@@ -57,6 +57,20 @@ async function extractTextFromPDF(filePath) {
   return fullText;
 }
 
+function parseRapport(text) {
+  const modes = {};
+  const p = s => parseFloat(s.replace(/ /g, '').replace(',', '.')) || 0;
+  for (const line of text.split('\n')) {
+    const m = line.match(/(\d{2})\/(\d{2})\/(\d{4})\s+([\d ,.,]+)\s+([\d ,.,]+)\s+([\d ,.,]+)\s+([\d ,.,]+)\s+([\d ,.,]+)/);
+    if (!m) continue;
+    const date = m[3] + '-' + m[2] + '-' + m[1];
+    if (date.startsWith('2026-06') || date.startsWith('2026-05') || date.startsWith('2026-07')) {
+      modes[date] = { especes: p(m[4]), cheques: p(m[5]), tpe: p(m[6]), bonsAchat: p(m[7]), avoir: p(m[8]) };
+    }
+  }
+  return modes;
+}
+
 function parseInvoice(text) {
   let numero = '';
   let m = text.match(/FACTURE\s*N[°�∞]?\s*:\s*(\d{4})\s*\/\s*(\d+)/);
@@ -129,6 +143,12 @@ db.exec(`
     date_facture TEXT NOT NULL, numero_facture TEXT NOT NULL, client TEXT,
     total_ht_0 REAL DEFAULT 0, total_ht_19 REAL DEFAULT 0, tva_19 REAL DEFAULT 0,
     timbre REAL DEFAULT 1, total_ttc REAL DEFAULT 0, created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS rapport_modes (
+    id TEXT PRIMARY KEY, dossier_id TEXT NOT NULL, date_jour TEXT NOT NULL,
+    especes REAL DEFAULT 0, cheques REAL DEFAULT 0, tpe REAL DEFAULT 0, bonsAchat REAL DEFAULT 0, avoir REAL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(dossier_id, date_jour)
   );
 `);
 
@@ -345,6 +365,39 @@ app.delete('/api/factures/:fid', (req, res) => {
   res.json({ ok: true });
 });
 
+// --- RAPPORT MODES (Vente par jour) ---
+app.get('/api/dossiers/:did/rapport', (req, res) => {
+  res.json(db.prepare('SELECT * FROM rapport_modes WHERE dossier_id = ? ORDER BY date_jour').all(req.params.did));
+});
+
+app.delete('/api/dossiers/:did/rapport', (req, res) => {
+  db.prepare('DELETE FROM rapport_modes WHERE dossier_id = ?').run(req.params.did);
+  res.json({ ok: true });
+});
+
+const rapportUpload = multer({ dest: uploadDir });
+app.post('/api/dossiers/:did/rapport', rapportUpload.single('file'), async (req, res) => {
+  const did = req.params.did;
+  const d = db.prepare('SELECT societe_id FROM dossiers WHERE id = ?').get(did);
+  if (!d) return res.status(404).json({ error: 'Dossier non trouve' });
+  if (!req.file) return res.status(400).json({ error: 'Fichier requis' });
+  try {
+    const text = await extractTextFromPDF(req.file.path);
+    const modes = parseRapport(text);
+    if (!Object.keys(modes).length) return res.status(400).json({ error: 'Aucune ligne vente par jour detectee. Verifie le PDF.' });
+    const stmt = db.prepare('INSERT OR REPLACE INTO rapport_modes (id, dossier_id, date_jour, especes, cheques, tpe, bonsAchat, avoir) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const txn = db.transaction(() => {
+      for (const [date, v] of Object.entries(modes)) stmt.run(genId(), did, date, v.especes, v.cheques, v.tpe, v.bonsAchat, v.avoir);
+    });
+    txn();
+    fs.unlinkSync(req.file.path);
+    res.json({ ok: true, count: Object.keys(modes).length, modes });
+  } catch (e) {
+    try { fs.unlinkSync(req.file.path); } catch {}
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- GENERATE VT J.C ---
 app.post('/api/dossiers/:did/generate-vtjc', (req, res) => {
   const did = req.params.did;
@@ -381,7 +434,8 @@ app.post('/api/dossiers/:did/generate-vtjc', (req, res) => {
       const timbres = dayFactures.reduce((s, f) => s + (f.timbre || 1), 0);
       const totalTTC = Math.round(dayFactures.reduce((s, f) => s + (f.total_ttc || 0), 0) * 1000) / 1000;
 
-      const modes = (req.body.modes && req.body.modes[date]) || RAPPORT_MODES_JUIN[date] || { especes: totalTTC, tpe: 0, cheques: 0, bonsAchat: 0, avoir: 0 };
+      const dbRapport = db.prepare('SELECT especes, cheques, tpe, bonsAchat, avoir FROM rapport_modes WHERE dossier_id = ? AND date_jour = ?').get(did, date);
+      const modes = (req.body.modes && req.body.modes[date]) || dbRapport || RAPPORT_MODES_JUIN[date] || { especes: totalTTC, tpe: 0, cheques: 0, bonsAchat: 0, avoir: 0 };
 
       const debitSum = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0) + (modes.bonsAchat || 0);
       const avoir = modes.avoir || 0;

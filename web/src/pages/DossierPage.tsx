@@ -9,7 +9,9 @@ export default function DossierPage() {
   const [pieces, setPieces] = useState<any[]>([]);
   const [ecritures, setEcritures] = useState<any[]>([]);
   const [factures, setFactures] = useState<any[]>([]);
-  const [tab, setTab] = useState<'factures' | 'ecritures' | 'pieces'>('factures');
+  const [tab, setTab] = useState<'factures' | 'ecritures' | 'pieces' | 'rapport'>('factures');
+  const [rapport, setRapport] = useState<any[]>([]);
+  const rapportRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [ocrProgress, setOcrProgress] = useState('');
@@ -29,8 +31,8 @@ export default function DossierPage() {
 
   const reload = async () => {
     if (!id) return;
-    const [d, p, e, f] = await Promise.all([api.getDossier(id), api.getPieces(id), api.getEcritures(id), api.getFactures(id)]);
-    setDossier(d); setPieces(p); setEcritures(e); setFactures(f);
+    const [d, p, e, f, r] = await Promise.all([api.getDossier(id), api.getPieces(id), api.getEcritures(id), api.getFactures(id), api.getRapport(id)]);
+    setDossier(d); setPieces(p); setEcritures(e); setFactures(f); setRapport(r);
     setLoading(false);
   };
 
@@ -80,6 +82,12 @@ export default function DossierPage() {
   };
 
   const delEcriture = async (eid: string) => { await api.deleteEcriture(eid); reload(); };
+  const handleRapport = async (files: FileList | null) => {
+    if (!files?.[0] || !id) return;
+    try { const r = await api.uploadRapport(id, files[0]); alert('Rapport importé: ' + r.count + ' jour(s)'); reload(); } catch (e: any) { alert('Erreur rapport: ' + e.message); }
+    if (rapportRef.current) rapportRef.current.value = '';
+  };
+  const delRapport = async () => { if (!id || !confirm('Supprimer rapport?')) return; await api.deleteRapport(id); reload(); };
 
   const exportCSV = async () => {
     if (!id) return;
@@ -107,10 +115,10 @@ export default function DossierPage() {
         </div>
       </div>
 
-      <div className="flex gap-2">
-        {(['factures', 'ecritures', 'pieces'] as const).map(t => (
+      <div className="flex gap-2 flex-wrap">
+        {(['factures', 'ecritures', 'pieces', 'rapport'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-lg text-sm font-medium capitalize ${tab === t ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-            {t} {t === 'factures' ? `(${factures.length})` : t === 'ecritures' ? `(${ecritures.length})` : `(${pieces.length})`}
+            {t} {t === 'factures' ? `(${factures.length})` : t === 'ecritures' ? `(${ecritures.length})` : t === 'pieces' ? `(${pieces.length})` : `(${rapport.length})`}
           </button>
         ))}
       </div>
@@ -171,7 +179,7 @@ export default function DossierPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
-                <th className="px-4 py-3">Journal</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">N Doc</th><th className="px-4 py-3">Libelle</th><th className="px-4 py-3">Compte D</th><th className="px-4 py-3">Compte C</th><th className="px-4 py-3 text-right">Montant</th><th className="px-4 py-3"></th>
+                <th className="px-4 py-3">Journal</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">N Doc</th><th className="px-4 py-3">Libelle</th><th className="px-4 py-3">Compte</th><th className="px-4 py-3">Sens</th><th className="px-4 py-3 text-right">Montant</th><th className="px-4 py-3"></th>
               </tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {ecritures.length === 0 ? (
@@ -182,9 +190,9 @@ export default function DossierPage() {
                     <td className="px-4 py-2">{e.date_operation}</td>
                     <td className="px-4 py-2 font-mono text-xs">{e.numero_doc || '-'}</td>
                     <td className="px-4 py-2">{e.libelle}</td>
-                    <td className="px-4 py-2 font-mono text-xs">{e.compte_debit}</td>
-                    <td className="px-4 py-2 font-mono text-xs">{e.compte_credit}</td>
-                    <td className="px-4 py-2 text-right font-mono">{e.montant.toFixed(3)}</td>
+                    <td className="px-4 py-2 font-mono text-xs">{e.compte || e.compte_debit || e.compte_credit}</td>
+                    <td className="px-4 py-2 font-mono text-xs"><span className={e.sens === 'D' ? 'text-emerald-600 font-bold' : 'text-blue-600 font-bold'}>{e.sens || (e.compte_debit ? 'D' : 'C')}</span></td>
+                    <td className="px-4 py-2 text-right font-mono">{(e.montant || 0).toFixed(3)}</td>
                     <td className="px-4 py-2"><button onClick={() => delEcriture(e.id)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></td>
                   </tr>
                 ))}
@@ -223,6 +231,30 @@ export default function DossierPage() {
                 <tbody className="divide-y divide-gray-100">
                   {pieces.map(p => <tr key={p.id} className="hover:bg-gray-50"><td className="px-4 py-2 flex items-center gap-2"><FileText className="w-4 h-4 text-red-500" />{p.nom_fichier}</td></tr>)}
                 </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'rapport' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border p-5">
+            <h2 className="font-semibold mb-2">Rapport Vente par jour</h2>
+            <p className="text-xs text-gray-500 mb-3">Upload le PDF "Vente par jour" (JDC) — cas séparé des factures. Utilisé pour ventilation 411003/411004/411005/411006/709500 lors de "Generer VT J.C".</p>
+            <input ref={rapportRef} type="file" accept=".pdf" className="hidden" onChange={e => handleRapport(e.target.files)} />
+            <div className="flex gap-2">
+              <button onClick={() => rapportRef.current?.click()} className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 flex items-center gap-1.5"><Upload className="w-4 h-4" /> Choisir rapport PDF</button>
+              {rapport.length > 0 && <button onClick={delRapport} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1.5"><Trash2 className="w-4 h-4" /> Supprimer</button>}
+            </div>
+            {rapport.length > 0 && <p className="text-xs text-emerald-600 mt-2">{rapport.length} jour(s) chargés — Generer VT J.C utilisera ce rapport</p>}
+            {rapport.length === 0 && <p className="text-xs text-gray-400 mt-2">Aucun rapport — generate utilisera le fallback Juin 2026 par défaut</p>}
+          </div>
+          {rapport.length > 0 && (
+            <div className="bg-white rounded-xl border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase"><th className="px-3 py-2">Date</th><th className="px-3 py-2 text-right">Espèces 411004</th><th className="px-3 py-2 text-right">Chèque 411003</th><th className="px-3 py-2 text-right">TPE 411005</th><th className="px-3 py-2 text-right">Bons 411006</th><th className="px-3 py-2 text-right">Avoir 709500</th></tr></thead>
+                <tbody className="divide-y divide-gray-100">{rapport.map((r: any) => <tr key={r.date_jour} className="hover:bg-gray-50"><td className="px-3 py-2 font-mono text-xs">{r.date_jour}</td><td className="px-3 py-2 text-right font-mono">{r.especes.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{r.cheques.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{r.tpe.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{r.bonsAchat.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{r.avoir.toFixed(2)}</td></tr>)}</tbody>
               </table>
             </div>
           )}
