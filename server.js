@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
 const path = require('path');
@@ -121,7 +121,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS ecritures (
     id TEXT PRIMARY KEY, dossier_id TEXT NOT NULL, societe_id TEXT NOT NULL, journal_code TEXT NOT NULL,
     date_operation TEXT NOT NULL, date_piece TEXT, numero_doc TEXT, libelle TEXT NOT NULL,
-    compte_debit TEXT NOT NULL, compte_credit TEXT NOT NULL, montant REAL NOT NULL,
+    compte TEXT NOT NULL, sens TEXT NOT NULL, montant REAL NOT NULL,
     tresorerie TEXT, statut TEXT DEFAULT 'brouillon', piece_id TEXT, created_at TEXT DEFAULT (datetime('now'))
   );
   CREATE TABLE IF NOT EXISTS factures (
@@ -146,6 +146,14 @@ if (!defaultDossier) {
   const soc = db.prepare('SELECT id FROM societes LIMIT 1').get();
   const did = 'dossier_animal';
   db.prepare('INSERT INTO dossiers (id, societe_id, nom) VALUES (?, ?, ?)').run(did, soc.id, 'ANIMAL');
+}
+
+// --- MIGRATE ecritures schema if needed ---
+const ecols = db.prepare("PRAGMA table_info(ecritures)").all().map(c => c.name);
+if (!ecols.includes('compte') && ecols.includes('compte_debit')) {
+  db.exec("ALTER TABLE ecritures ADD COLUMN compte TEXT");
+  db.exec("ALTER TABLE ecritures ADD COLUMN sens TEXT");
+  db.exec("UPDATE ecritures SET compte = compte_debit, sens = 'D' WHERE compte_debit IS NOT NULL");
 }
 
 // --- SOCIETES ---
@@ -261,8 +269,8 @@ app.get('/api/dossiers/:did/ecritures', (req, res) => {
 app.post('/api/dossiers/:did/ecritures', (req, res) => {
   const b = req.body;
   const id = genId();
-  db.prepare(`INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte_debit, compte_credit, montant, tresorerie, piece_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(id, req.params.did, b.societe_id, b.journal_code, b.date_operation, b.date_piece || null, b.numero_doc || null, b.libelle, b.compte_debit, b.compte_credit, b.montant, b.tresorerie || null, b.piece_id || null);
+  db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte, sens, montant, tresorerie, piece_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(id, req.params.did, b.societe_id, b.journal_code, b.date_operation, b.date_piece || null, b.numero_doc || null, b.libelle, b.compte, b.sens, b.montant, b.tresorerie || null, b.piece_id || null);
   db.prepare('UPDATE dossiers SET nb_ecritures = nb_ecritures + 1 WHERE id = ?').run(req.params.did);
   res.json({ id, ...b });
 });
@@ -278,13 +286,40 @@ app.delete('/api/ecritures/:eid', (req, res) => {
 
 // --- EXPORT CSV ---
 app.get('/api/dossiers/:did/export', (req, res) => {
-  const rows = db.prepare('SELECT * FROM ecritures WHERE dossier_id = ? ORDER BY date_operation, journal_code').all(req.params.did);
-  const header = 'Date operation;Date piece;Journal;N doc;Libelle;Compte debit;Compte credit;Montant;Sens;Tresorerie';
-  const lines = rows.map(e => [
-    e.date_operation, e.date_piece || '', e.journal_code, e.numero_doc || '',
-    e.libelle, e.compte_debit, e.compte_credit, e.montant.toFixed(3),
-    e.compte_debit.startsWith('5') ? 'T' : 'D', e.tresorerie || ''
-  ].join(';'));
+  const rows = db.prepare('SELECT * FROM ecritures WHERE dossier_id = ? ORDER BY date_operation, journal_code, compte').all(req.params.did);
+  const header = 'Date operation;Date piece;Journal;N doc;Libelle;Compte;Sens;Montant;Tresorerie';
+  const anomalies = [];
+  const lines = [];
+  let totalD = 0, totalC = 0;
+
+  for (const e of rows) {
+    const sens = e.sens || 'D';
+    const montant = e.montant;
+
+    if (!e.date_operation) { anomalies.push('Ligne ' + e.id + ': date operation vide'); continue; }
+    if (montant === 0) continue;
+
+    if (sens === 'D') totalD += montant;
+    else totalC += montant;
+
+    lines.push([
+      e.date_operation, e.date_piece || '', e.journal_code, e.numero_doc || '',
+      e.libelle, e.compte, sens, montant.toFixed(3), e.tresorerie || ''
+    ].join(';'));
+  }
+
+  const diff = Math.round((totalD - totalC) * 1000) / 1000;
+  if (Math.abs(diff) > 0.001) anomalies.push('DESEQUILIBRE: D=' + totalD.toFixed(3) + ' C=' + totalC.toFixed(3) + ' diff=' + diff.toFixed(3));
+
+  const EXPORT_SENS = { '707200': 'C', '707219': 'C', '436711': 'C', '437500': 'C', '709500': 'C' };
+  for (const e of rows) {
+    if (e.montant === 0) continue;
+    const expected = EXPORT_SENS[e.compte];
+    if (expected && e.sens !== expected) {
+      anomalies.push('MAUVAIS SENS: ' + e.compte + ' a sens=' + e.sens + ' au lieu de ' + expected + ' (ligne ' + e.id + ')');
+    }
+  }
+
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="ecritures_${req.params.did}.csv"`);
   res.send([header, ...lines].join('\n'));
@@ -327,58 +362,60 @@ app.post('/api/dossiers/:did/generate-vtjc', (req, res) => {
     byDay[f.date_facture].push(f);
   }
 
+  const anomalies = [];
+  const insertE = db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte, sens, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
   const allEntries = [];
-  for (const [date, dayFactures] of Object.entries(byDay)) {
-    const nums = dayFactures.map(f => f.numero_facture.replace(/[^0-9]/g, '')).sort((a, b) => a - b);
-    const numPiece = nums.length === 1 ? 'FAC N' + nums[0] + '-26' : 'FAC N' + nums.join('-') + '-26';
 
-    const clients = [...new Set(dayFactures.map(f => f.client).filter(Boolean))];
-    const hasNamed = clients.length > 0 && !(clients.length === 1 && clients[0] === '');
-    const libelle = hasNamed ? 'CLTS PASSAGERS/' + clients.join('/') : 'CLTS PASSAGERS';
+  const txn = db.transaction(() => {
+    for (const [date, dayFactures] of Object.entries(byDay)) {
+      const nums = dayFactures.map(f => f.numero_facture.replace(/[^0-9]/g, '')).sort((a, b) => a - b);
+      const numPiece = nums.length === 1 ? 'FAC N' + nums[0] + '-26' : 'FAC N' + nums.join('-') + '-26';
 
-    const totalHT0 = dayFactures.reduce((s, f) => s + (f.total_ht_0 || 0), 0);
-    const totalHT19 = dayFactures.reduce((s, f) => s + (f.total_ht_19 || 0), 0);
-    const tva19 = dayFactures.reduce((s, f) => s + (f.tva_19 || 0), 0);
-    const timbres = dayFactures.length;
-    const totalTTC = dayFactures.reduce((s, f) => s + (f.total_ttc || 0), 0);
+      const clients = [...new Set(dayFactures.map(f => f.client).filter(Boolean))];
+      const hasNamed = clients.length > 0 && !(clients.length === 1 && clients[0] === '');
+      const libelle = hasNamed ? 'CLTS PASSAGERS/' + clients.join('/') : 'CLTS PASSAGERS';
 
-    const modes = (req.body.modes && req.body.modes[date]) || { especes: totalTTC, tpe: 0, cheques: 0, avoirs: 0 };
+      const totalHT0 = Math.round(dayFactures.reduce((s, f) => s + (f.total_ht_0 || 0), 0) * 1000) / 1000;
+      const totalHT19 = Math.round(dayFactures.reduce((s, f) => s + (f.total_ht_19 || 0), 0) * 1000) / 1000;
+      const tva19 = Math.round(dayFactures.reduce((s, f) => s + (f.tva_19 || 0), 0) * 1000) / 1000;
+      const timbres = dayFactures.reduce((s, f) => s + (f.timbre || 1), 0);
+      const totalTTC = Math.round(dayFactures.reduce((s, f) => s + (f.total_ttc || 0), 0) * 1000) / 1000;
 
-    const debitSum = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0);
-    const creditSum = (modes.avoirs || 0) + tva19 + timbres + totalHT0 + totalHT19;
-    const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
+      const modes = (req.body.modes && req.body.modes[date]) || { especes: totalTTC, tpe: 0, cheques: 0 };
 
-    const ecrId = genId();
-    db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte_debit, compte_credit, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(ecrId, did, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '411004', 0, null);
+      const debitSum = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0);
+      const creditSum = tva19 + timbres + totalHT0 + totalHT19;
+      const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
 
-    const lines = [];
-    if (modes.especes > 0) lines.push(['411004', modes.especes, 'D']);
-    if (modes.tpe > 0) lines.push(['411005', modes.tpe, 'D']);
-    if (modes.cheques > 0) lines.push(['411003', modes.cheques, 'D']);
-    if (modes.avoirs > 0) lines.push(['709500', modes.avoirs, 'C']);
-    lines.push(['436711', tva19, 'C']);
-    lines.push(['437500', timbres, 'C']);
-    if (totalHT0 > 0) lines.push(['707200', totalHT0, 'C']);
-    if (totalHT19 > 0) lines.push(['707219', totalHT19, 'C']);
-    if (ecart !== 0) lines.push(['634500', Math.abs(ecart), ecart > 0 ? 'C' : 'D']);
+      const lines = [];
+      if ((modes.especes || 0) > 0) lines.push({ compte: '411004', montant: Math.round(modes.especes * 1000) / 1000, sens: 'D' });
+      if ((modes.tpe || 0) > 0) lines.push({ compte: '411005', montant: Math.round(modes.tpe * 1000) / 1000, sens: 'D' });
+      if ((modes.cheques || 0) > 0) lines.push({ compte: '411003', montant: Math.round(modes.cheques * 1000) / 1000, sens: 'D' });
+      if (tva19 > 0) lines.push({ compte: '436711', montant: tva19, sens: 'C' });
+      lines.push({ compte: '437500', montant: timbres, sens: 'C' });
+      if (totalHT0 > 0) lines.push({ compte: '707200', montant: totalHT0, sens: 'C' });
+      if (totalHT19 > 0) lines.push({ compte: '707219', montant: totalHT19, sens: 'C' });
+      if (ecart !== 0) lines.push({ compte: '634500', montant: Math.abs(ecart), sens: ecart > 0 ? 'C' : 'D' });
 
-    for (const [compte, montant, sens] of lines) {
-      const lid = genId();
-      if (sens === 'D') {
-        db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte_debit, compte_credit, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(lid, did, d.societe_id, 'VT J.C', date, date, numPiece, libelle, compte, '411004', montant, null);
-      } else {
-        db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte_debit, compte_credit, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(lid, did, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', compte, montant, null);
+      for (const { compte, montant, sens } of lines) {
+        insertE.run(genId(), did, d.societe_id, 'VT J.C', date, date, numPiece, libelle, compte, sens, montant, null);
       }
+
+      const dayD = lines.filter(l => l.sens === 'D').reduce((s, l) => s + l.montant, 0);
+      const dayC = lines.filter(l => l.sens === 'C').reduce((s, l) => s + l.montant, 0);
+      const dayDiff = Math.round((dayD - dayC) * 1000) / 1000;
+      if (Math.abs(dayDiff) > 0.001) {
+        anomalies.push({ date, numPiece, error: 'DESEQUILIBRE D=' + dayD.toFixed(3) + ' C=' + dayC.toFixed(3) + ' diff=' + dayDiff.toFixed(3) });
+      }
+
+      allEntries.push({ date, numPiece, libelle, totalHT0, totalHT19, tva19, timbres, totalTTC, modes, ecart, lignes: lines });
     }
 
-    allEntries.push({ date, numPiece, libelle, totalHT0, totalHT19, tva19, timbres, totalTTC, modes, ecart, lignes: lines });
-  }
+    db.prepare('UPDATE dossiers SET nb_ecritures = (SELECT COUNT(*) FROM ecritures WHERE dossier_id = ?) WHERE id = ?').run(did, did);
+  });
 
-  db.prepare('UPDATE dossiers SET nb_ecritures = (SELECT COUNT(*) FROM ecritures WHERE dossier_id = ?) WHERE id = ?').run(did, did);
-  res.json({ days: allEntries.length, entries: allEntries });
+  txn();
+  res.json({ days: allEntries.length, entries: allEntries, anomalies });
 });
 
 // --- SEED JUNE 2026 ---
@@ -392,7 +429,7 @@ app.post('/api/seed-juin-2026', (req, res) => {
   if (existing.c > 0) return res.json({ ok: true, message: 'Already seeded', count: existing.c });
 
   const insertF = db.prepare('INSERT INTO factures (id, dossier_id, societe_id, date_facture, numero_facture, client, total_ht_0, total_ht_19, tva_19, timbre, total_ttc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-  const insertE = db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte_debit, compte_credit, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  const insertE = db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte, sens, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
 
   const txn = db.transaction(() => {
     for (const [num, date, client, ht0, ht19, tva, timbre, ttc] of JUIN_2026_DATA) {
@@ -410,22 +447,22 @@ app.post('/api/seed-juin-2026', (req, res) => {
       const numPiece = nums.length === 1 ? 'FAC N' + nums[0] + '-26' : 'FAC N' + nums.join('-') + '-26';
       const clients = [...new Set(dayF.map(f => f.client).filter(Boolean))];
       const libelle = clients.length > 0 ? 'CLTS PASSAGERS/' + clients.join('/') : 'CLTS PASSAGERS';
-      const totalHT0 = dayF.reduce((s, f) => s + f.ht0, 0);
-      const totalHT19 = dayF.reduce((s, f) => s + f.ht19, 0);
-      const tva19 = dayF.reduce((s, f) => s + f.tva, 0);
-      const timbres = dayF.length;
-      const totalTTC = dayF.reduce((s, f) => s + f.ttc, 0);
-      const especes = totalTTC;
+      const totalHT0 = Math.round(dayF.reduce((s, f) => s + f.ht0, 0) * 1000) / 1000;
+      const totalHT19 = Math.round(dayF.reduce((s, f) => s + f.ht19, 0) * 1000) / 1000;
+      const tva19 = Math.round(dayF.reduce((s, f) => s + f.tva, 0) * 1000) / 1000;
+      const timbres = dayF.reduce((s, f) => s + (f.timbre || 1), 0);
+      const totalTTC = Math.round(dayF.reduce((s, f) => s + f.ttc, 0) * 1000) / 1000;
+      
       const creditSum = tva19 + timbres + totalHT0 + totalHT19;
-      const ecart = Math.round((especes - creditSum) * 1000) / 1000;
+      const ecart = Math.round((totalTTC - creditSum) * 1000) / 1000;
 
-      insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '411004', 0, null);
-      if (especes > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '411004', especes, null);
-      if (totalHT0 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '707200', totalHT0, null);
-      if (totalHT19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '707219', totalHT19, null);
-      insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '436711', tva19, null);
-      insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '437500', timbres, null);
-      if (ecart !== 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '634500', Math.abs(ecart), null);
+      
+      insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', 'D', totalTTC, null);
+      if (totalHT0 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707200', 'C', totalHT0, null);
+      if (totalHT19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707219', 'C', totalHT19, null);
+      if (tva19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '436711', 'C', tva19, null);
+      insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '437500', 'C', timbres, null);
+      if (ecart !== 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '634500', ecart > 0 ? 'C' : 'D', Math.abs(ecart), null);
     }
 
     db.prepare('UPDATE dossiers SET nb_ecritures = (SELECT COUNT(*) FROM ecritures WHERE dossier_id = ?) WHERE id = ?').run(d.id, d.id);
