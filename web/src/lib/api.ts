@@ -33,4 +33,11 @@ export const api = {
   addFacture: (did: string, d: any) => req<any>(`/dossiers/${did}/factures`, { method: 'POST', body: JSON.stringify(d) }),
   deleteFacture: (fid: string) => req<any>(`/factures/${fid}`, { method: 'DELETE' }),
   generateVTJC: (did: string, modes?: any) => req<any>(`/dossiers/${did}/generate-vtjc`, { method: 'POST', body: JSON.stringify({ modes: modes || {} }) }),
+  process: async (did: string, files: File[]) => {
+    const fd = new FormData();
+    files.forEach(f => fd.append('files', f));
+    const r = await fetch(`${BASE}/dossiers/${did}/process`, { method: 'POST', body: fd });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Erreur ${r.status}`);
+    return r.json();
+  },
 };

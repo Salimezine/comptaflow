@@ -2,7 +2,6 @@ import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Upload, Plus, Trash2, Download, ArrowLeft, FileText, Zap, Loader2 } from 'lucide-react';
 import { api } from '../lib/api';
-import { processFile } from '../lib/ocr';
 
 export default function DossierPage() {
   const { id } = useParams<{ id: string }>();
@@ -39,33 +38,17 @@ export default function DossierPage() {
   const handleUpload = async (files: FileList | null) => {
     if (!files?.length || !id) return;
     setUploading(true);
-    setOcrProgress('Upload en cours...');
+    setOcrProgress('Traitement de ' + files.length + ' fichier(s) en cours...');
     try {
-      await api.upload(id, Array.from(files));
-      setOcrProgress('OCR en cours sur ' + files.length + ' fichier(s)...');
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        setOcrProgress('Traitement de ' + file.name + ' (' + (i + 1) + '/' + files.length + ')...');
-        try {
-          const extracted = await processFile(file);
-          await api.addFacture(id, {
-            date_facture: extracted.date_facture,
-            numero_facture: extracted.numero_facture,
-            client: extracted.client,
-            total_ht_0: extracted.total_ht_0,
-            total_ht_19: extracted.total_ht_19,
-            tva_19: extracted.tva_19,
-            timbre: extracted.timbre,
-            total_ttc: extracted.total_ttc,
-          });
-        } catch (e: any) {
-          console.error('OCR error for ' + file.name + ':', e);
-        }
-      }
-      setOcrProgress('Termine!');
+      const result = await api.process(id, Array.from(files));
+      const ok = result.results.filter((r: any) => r.ok).length;
+      const ko = result.results.filter((r: any) => !r.ok).length;
+      setOcrProgress(ok + ' facture(s) extraite(s). Generation VT J.C...');
+      await api.generateVTJC(id);
+      setOcrProgress('Termine! ' + ok + ' facture(s) + ecritures generees' + (ko ? ' (' + ko + ' erreur(s))' : ''));
       await reload();
     } catch (e: any) { alert('Erreur: ' + e.message); }
-    finally { setUploading(false); setTimeout(() => setOcrProgress(''), 2000); }
+    finally { setUploading(false); setTimeout(() => setOcrProgress(''), 3000); }
   };
 
   const addFacture = async () => {

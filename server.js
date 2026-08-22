@@ -21,6 +21,86 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 function genId() { return crypto.randomBytes(8).toString('hex'); }
 
+// --- PDF TEXT EXTRACTION (server-side) ---
+async function extractTextFromPDF(filePath) {
+  const pdfjsLib = await import('./web/node_modules/pdfjs-dist/legacy/build/pdf.mjs');
+  const data = new Uint8Array(fs.readFileSync(filePath));
+  const doc = await pdfjsLib.getDocument({ data }).promise;
+  let fullText = '';
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    // Reconstruct lines using y-positions
+    const items = content.items.filter(item => item.str.trim());
+    if (items.length === 0) continue;
+    // Sort by y (top to bottom), then x (left to right)
+    items.sort((a, b) => {
+      const ay = a.transform[5], by = b.transform[5];
+      if (Math.abs(ay - by) > 2) return by - ay; // different lines: top first
+      return a.transform[4] - b.transform[4]; // same line: left first
+    });
+    let lines = [];
+    let currentLine = [items[0]];
+    for (let j = 1; j < items.length; j++) {
+      const prev = currentLine[currentLine.length - 1];
+      const dy = Math.abs(items[j].transform[5] - prev.transform[5]);
+      if (dy > 2) {
+        lines.push(currentLine.map(x => x.str).join(' '));
+        currentLine = [items[j]];
+      } else {
+        currentLine.push(items[j]);
+      }
+    }
+    lines.push(currentLine.map(x => x.str).join(' '));
+    fullText += lines.join('\n') + '\n';
+  }
+  return fullText;
+}
+
+function parseInvoice(text) {
+  let numero = '';
+  let m = text.match(/FACTURE\s*N[°�∞]?\s*:\s*(\d{4})\s*\/\s*(\d+)/);
+  if (m) numero = m[1] + '/' + m[2];
+
+  let date = '';
+  m = text.match(/LE\s*:\s*(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) date = m[3] + '-' + m[2] + '-' + m[1];
+
+  let client = '';
+  m = text.match(/(?<!Code )Client\s*:\s*(.+?)(?:\n|$)/);
+  if (m) {
+    const c = m[1].trim();
+    client = c.toUpperCase().includes('PASSAGERS') ? 'CLIENTS PASSAGERS' : c;
+  }
+
+  let ht0 = 0, ht19 = 0, tva19 = 0, ttc = 0, timbre = 1.0;
+  const lines = text.split('\n');
+
+  for (const line of lines) {
+    if (ht0 === 0) {
+      m = line.match(/^([\d][\d ,.]+?)\s+0%\s/);
+      if (m) { try { ht0 = parseFloat(m[1].trim().replace(/ /g, '').replace(',', '.')); } catch(e) {} }
+    }
+    if (ht19 === 0) {
+      m = line.match(/^([\d][\d ,.]+?)\s+19%\s+([\d ,.]+)/);
+      if (m) {
+        try { ht19 = parseFloat(m[1].trim().replace(/ /g, '').replace(',', '.')); } catch(e) {}
+        try { tva19 = parseFloat(m[2].trim().replace(/ /g, '').replace(',', '.')); } catch(e) {}
+      }
+    }
+    if (timbre === 1.0) {
+      m = line.match(/TIMBRE\s+FIS\.\s*:\s*([\d ,.]+)/);
+      if (m) { try { timbre = parseFloat(m[1].trim().replace(/ /g, '').replace(',', '.')); } catch(e) {} }
+    }
+    if (ttc === 0) {
+      m = line.match(/NET\s+T\.T\.C\.\s*([\d ,.]+)/);
+      if (m) { try { ttc = parseFloat(m[1].trim().replace(/ /g, '').replace(',', '.')); } catch(e) {} }
+    }
+  }
+
+  return { date, numero, client, ht0, ht19, tva19, timbre, ttc };
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS societes (
     id TEXT PRIMARY KEY, raison_sociale TEXT NOT NULL, matricule_fiscal TEXT, created_at TEXT DEFAULT (datetime('now'))
@@ -136,6 +216,36 @@ app.post('/api/dossiers/:did/upload', upload.array('files', 50), (req, res) => {
   }
   db.prepare('UPDATE dossiers SET nb_pieces = nb_pieces + ? WHERE id = ?').run(created.length, did);
   res.json({ uploaded: created.length, pieces: created });
+});
+
+// --- PROCESS: Upload + OCR + Create factures ---
+app.post('/api/dossiers/:did/process', upload.array('files', 50), async (req, res) => {
+  const did = req.params.did;
+  const d = db.prepare('SELECT * FROM dossiers WHERE id = ?').get(did);
+  if (!d) return res.status(404).json({ error: 'Dossier non trouve' });
+
+  const results = [];
+  for (const f of req.files) {
+    try {
+      const text = await extractTextFromPDF(f.path);
+      const inv = parseInvoice(text);
+      if (!inv.numero) inv.numero = f.originalname.replace(/[^0-9]/g, '');
+
+      const fid = genId();
+      db.prepare('INSERT INTO factures (id, dossier_id, societe_id, date_facture, numero_facture, client, total_ht_0, total_ht_19, tva_19, timbre, total_ttc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(fid, did, d.societe_id, inv.date, inv.numero, inv.client, inv.ht0, inv.ht19, inv.tva19, inv.timbre, inv.ttc);
+
+      db.prepare('INSERT INTO pieces (id, dossier_id, societe_id, nom_fichier, chemin) VALUES (?, ?, ?, ?, ?)')
+        .run(genId(), did, d.societe_id, f.originalname, f.path);
+
+      results.push({ file: f.originalname, numero: inv.numero, date: inv.date, client: inv.client, ht0: inv.ht0, ht19: inv.ht19, tva19: inv.tva19, ttc: inv.ttc, ok: true });
+    } catch (e) {
+      results.push({ file: f.originalname, error: e.message, ok: false });
+    }
+  }
+
+  db.prepare('UPDATE dossiers SET nb_pieces = (SELECT COUNT(*) FROM pieces WHERE dossier_id = ?) WHERE id = ?').run(did, did);
+  res.json({ processed: results.length, results });
 });
 
 // --- LIST PIECES ---
