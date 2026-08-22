@@ -375,6 +375,23 @@ app.delete('/api/dossiers/:did/rapport', (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/dossiers/:did/rapport/bulk', (req, res) => {
+  const did = req.params.did;
+  const d = db.prepare('SELECT societe_id FROM dossiers WHERE id = ?').get(did);
+  if (!d) return res.status(404).json({ error: 'Dossier non trouve' });
+  const rows = req.body.rows || req.body;
+  if (!Array.isArray(rows) || !rows.length) return res.status(400).json({ error: 'rows[] requis' });
+  const stmt = db.prepare('INSERT OR REPLACE INTO rapport_modes (id, dossier_id, date_jour, especes, cheques, tpe, bonsAchat, avoir) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+  const txn = db.transaction(() => {
+    for (const r of rows) {
+      const date = r.date_jour || r.date;
+      stmt.run(genId(), did, date, r.especes || 0, r.cheques || 0, r.tpe || 0, r.bonsAchat || 0, r.avoir || 0);
+    }
+  });
+  txn();
+  res.json({ ok: true, count: rows.length });
+});
+
 const rapportUpload = multer({ dest: uploadDir });
 app.post('/api/dossiers/:did/rapport', rapportUpload.single('file'), async (req, res) => {
   const did = req.params.did;
