@@ -16,6 +16,7 @@ export default function DossierPage() {
   const [dragOver, setDragOver] = useState(false);
   const [generating, setGenerating] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const dirRef = useRef<HTMLInputElement>(null);
 
   // Form facture
   const [fDate, setFDate] = useState(new Date().toISOString().split('T')[0]);
@@ -201,6 +202,20 @@ export default function DossierPage() {
             <input ref={fileRef} type="file" multiple accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => handleUpload(e.target.files)} />
             {uploading ? <div className="animate-spin w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full mx-auto" /> : <><Upload className="w-10 h-10 mx-auto text-gray-400 mb-3" /><p className="text-sm font-medium text-gray-700">Glissez vos PDF/images ici</p><p className="text-xs text-gray-400 mt-1">PDF, JPG, PNG - Multiple fichiers</p></>}
           </div>
+          <input ref={dirRef} type="file" className="hidden" /* @ts-ignore */
+            webkitdirectory="" directory="" multiple
+            onChange={e => { if (e.target.files?.length) handleUpload(e.target.files); e.target.value = ''; }} />
+          <div className="flex gap-2">
+            <button onClick={() => fileRef.current?.click()} disabled={uploading}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
+              <Upload className="w-4 h-4" /> Choisir des fichiers
+            </button>
+            <button onClick={() => dirRef.current?.click()} disabled={uploading}
+              className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1.5">
+              <FileText className="w-4 h-4" /> Choisir un dossier
+            </button>
+          </div>
+          <p className="text-xs text-gray-400">"Choisir un dossier" selectionne tous les PDF d'un dossier d'un seul click</p>
           {pieces.length > 0 && (
             <div className="bg-white rounded-xl border overflow-hidden">
               <table className="w-full text-sm">
