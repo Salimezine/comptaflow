@@ -1,0 +1,20 @@
+{
+  "name": "eurex",
+  "version": "1.0.0",
+  "description": "Plateforme web permettant de transformer un dossier complet de pieces justificatives (PDF) en ecritures comptables pretes a l'import, conforme au Systeme Comptable des Entreprises tunisiennes (SCE 1996).",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "multer": "^2.2.0"
+  }
+}
