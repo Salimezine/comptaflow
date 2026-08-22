@@ -29,4 +29,8 @@ export const api = {
   addEcriture: (did: string, d: any) => req<any>(`/dossiers/${did}/ecritures`, { method: 'POST', body: JSON.stringify(d) }),
   deleteEcriture: (eid: string) => req<any>(`/ecritures/${eid}`, { method: 'DELETE' }),
   exportCSV: (did: string) => req<string>(`/dossiers/${did}/export`),
+  getFactures: (did: string) => req<any[]>(`/dossiers/${did}/factures`),
+  addFacture: (did: string, d: any) => req<any>(`/dossiers/${did}/factures`, { method: 'POST', body: JSON.stringify(d) }),
+  deleteFacture: (fid: string) => req<any>(`/factures/${fid}`, { method: 'DELETE' }),
+  generateVTJC: (did: string, modes?: any) => req<any>(`/dossiers/${did}/generate-vtjc`, { method: 'POST', body: JSON.stringify({ modes: modes || {} }) }),
 };

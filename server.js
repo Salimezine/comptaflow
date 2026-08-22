@@ -44,6 +44,12 @@ db.exec(`
     compte_debit TEXT NOT NULL, compte_credit TEXT NOT NULL, montant REAL NOT NULL,
     tresorerie TEXT, statut TEXT DEFAULT 'brouillon', piece_id TEXT, created_at TEXT DEFAULT (datetime('now'))
   );
+  CREATE TABLE IF NOT EXISTS factures (
+    id TEXT PRIMARY KEY, dossier_id TEXT NOT NULL, societe_id TEXT NOT NULL,
+    date_facture TEXT NOT NULL, numero_facture TEXT NOT NULL, client TEXT,
+    total_ht_0 REAL DEFAULT 0, total_ht_19 REAL DEFAULT 0, tva_19 REAL DEFAULT 0,
+    timbre REAL DEFAULT 1, total_ttc REAL DEFAULT 0, created_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 // --- AUTO CREATE DEFAULT DATA ---
@@ -172,6 +178,97 @@ app.get('/api/dossiers/:did/export', (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="ecritures_${req.params.did}.csv"`);
   res.send([header, ...lines].join('\n'));
+});
+
+// --- FACTURES ---
+app.get('/api/dossiers/:did/factures', (req, res) => {
+  res.json(db.prepare('SELECT * FROM factures WHERE dossier_id = ? ORDER BY date_facture, numero_facture').all(req.params.did));
+});
+
+app.post('/api/dossiers/:did/factures', (req, res) => {
+  const b = req.body;
+  const id = genId();
+  const d = db.prepare('SELECT societe_id FROM dossiers WHERE id = ?').get(req.params.did);
+  if (!d) return res.status(404).json({ error: 'Dossier non trouve' });
+  db.prepare('INSERT INTO factures (id, dossier_id, societe_id, date_facture, numero_facture, client, total_ht_0, total_ht_19, tva_19, timbre, total_ttc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(id, req.params.did, d.societe_id, b.date_facture, b.numero_facture, b.client || '', b.total_ht_0 || 0, b.total_ht_19 || 0, b.tva_19 || 0, b.timbre || 1, b.total_ttc || 0);
+  res.json({ id, ...b }, 201);
+});
+
+app.delete('/api/factures/:fid', (req, res) => {
+  db.prepare('DELETE FROM factures WHERE id = ?').run(req.params.fid);
+  res.json({ ok: true });
+});
+
+// --- GENERATE VT J.C ---
+app.post('/api/dossiers/:did/generate-vtjc', (req, res) => {
+  const did = req.params.did;
+  const d = db.prepare('SELECT * FROM dossiers WHERE id = ?').get(did);
+  if (!d) return res.status(404).json({ error: 'Dossier non trouve' });
+
+  const factures = db.prepare('SELECT * FROM factures WHERE dossier_id = ? ORDER BY date_facture, numero_facture').all(did);
+  if (!factures.length) return res.status(400).json({ error: 'Aucune facture' });
+
+  db.prepare("DELETE FROM ecritures WHERE dossier_id = ? AND journal_code = 'VT J.C'").run(did);
+
+  const byDay = {};
+  for (const f of factures) {
+    if (!byDay[f.date_facture]) byDay[f.date_facture] = [];
+    byDay[f.date_facture].push(f);
+  }
+
+  const allEntries = [];
+  for (const [date, dayFactures] of Object.entries(byDay)) {
+    const nums = dayFactures.map(f => f.numero_facture.replace(/[^0-9]/g, '')).sort((a, b) => a - b);
+    const numPiece = nums.length === 1 ? 'FAC N' + nums[0] + '-26' : 'FAC N' + nums.join('-') + '-26';
+
+    const clients = [...new Set(dayFactures.map(f => f.client).filter(Boolean))];
+    const hasNamed = clients.length > 0 && !(clients.length === 1 && clients[0] === '');
+    const libelle = hasNamed ? 'CLTS PASSAGERS/' + clients.join('/') : 'CLTS PASSAGERS';
+
+    const totalHT0 = dayFactures.reduce((s, f) => s + (f.total_ht_0 || 0), 0);
+    const totalHT19 = dayFactures.reduce((s, f) => s + (f.total_ht_19 || 0), 0);
+    const tva19 = dayFactures.reduce((s, f) => s + (f.tva_19 || 0), 0);
+    const timbres = dayFactures.length;
+    const totalTTC = dayFactures.reduce((s, f) => s + (f.total_ttc || 0), 0);
+
+    const modes = (req.body.modes && req.body.modes[date]) || { especes: totalTTC, tpe: 0, cheques: 0, avoirs: 0 };
+
+    const debitSum = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0);
+    const creditSum = (modes.avoirs || 0) + tva19 + timbres + totalHT0 + totalHT19;
+    const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
+
+    const ecrId = genId();
+    db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte_debit, compte_credit, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(ecrId, did, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '411004', 0, null);
+
+    const lines = [];
+    if (modes.especes > 0) lines.push(['411004', modes.especes, 'D']);
+    if (modes.tpe > 0) lines.push(['411005', modes.tpe, 'D']);
+    if (modes.cheques > 0) lines.push(['411003', modes.cheques, 'D']);
+    if (modes.avoirs > 0) lines.push(['709500', modes.avoirs, 'C']);
+    lines.push(['436711', tva19, 'C']);
+    lines.push(['437500', timbres, 'C']);
+    if (totalHT0 > 0) lines.push(['707200', totalHT0, 'C']);
+    if (totalHT19 > 0) lines.push(['707219', totalHT19, 'C']);
+    if (ecart !== 0) lines.push(['634500', Math.abs(ecart), ecart > 0 ? 'C' : 'D']);
+
+    for (const [compte, montant, sens] of lines) {
+      const lid = genId();
+      if (sens === 'D') {
+        db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte_debit, compte_credit, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(lid, did, d.societe_id, 'VT J.C', date, date, numPiece, libelle, compte, '411004', montant, null);
+      } else {
+        db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte_debit, compte_credit, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(lid, did, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', compte, montant, null);
+      }
+    }
+
+    allEntries.push({ date, numPiece, libelle, totalHT0, totalHT19, tva19, timbres, totalTTC, modes, ecart, lignes: lines });
+  }
+
+  db.prepare('UPDATE dossiers SET nb_ecritures = (SELECT COUNT(*) FROM ecritures WHERE dossier_id = ?) WHERE id = ?').run(did, did);
+  res.json({ days: allEntries.length, entries: allEntries });
 });
 
 // --- DASHBOARD ---
