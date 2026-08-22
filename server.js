@@ -61,19 +61,23 @@ function parseRapport(text) {
   const modes = {};
   const p = s => parseFloat(s.replace(/ /g, '').replace(',', '.')) || 0;
   for (const line of text.split('\n')) {
-    const m = line.match(/(\d{2})\/(\d{2})\/(\d{4})\s+([\d ,.,]+)\s+([\d ,.,]+)\s+([\d ,.,]+)\s+([\d ,.,]+)\s+([\d ,.,]+)/);
+    const m = line.match(/(\d{2})\/(\d{2})\/(\d{4})\s+([\d ,.,]+)\s+([\d ,.,]+)\s+([\d ,.,]+)\s+([\d ,.,]+)\s+([\d ,.,]+)\s+([\d ,.,]+)\s+([\d ,.,]+)\s+([\d ,.,]+)/);
     if (!m) continue;
     const date = m[3] + '-' + m[2] + '-' + m[1];
-    if (date.startsWith('2026-06') || date.startsWith('2026-05') || date.startsWith('2026-07')) {
-      modes[date] = { especes: p(m[4]), cheques: p(m[5]), tpe: p(m[6]), bonsAchat: p(m[7]), avoir: p(m[8]) };
-    }
+    modes[date] = {
+      especes: p(m[4]),
+      cheques: p(m[5]),
+      tpe: p(m[6]),
+      bonsAchat: p(m[7]),
+      avoir: p(m[8])
+    };
   }
   return modes;
 }
 
 function parseInvoice(text) {
   let numero = '';
-  let m = text.match(/FACTURE\s*N[°??]?\s*:\s*(\d{4})\s*\/\s*(\d+)/);
+  let m = text.match(/FACTURE\s*N[ï¿½??]?\s*:\s*(\d{4})\s*\/\s*(\d+)/);
   if (m) numero = m[1] + '/' + m[2];
 
   let date = '';
@@ -533,44 +537,46 @@ const RAPPORT_MODES_JUIN = {
   '2026-05-29': { especes: 1732.87, cheques: 4.00, tpe: 15.62, bonsAchat: 0, avoir: 0 },
   '2026-05-30': { especes: 2657.96, cheques: 4.00, tpe: 238.26, bonsAchat: 0, avoir: 0 },
   '2026-05-31': { especes: 2498.30, cheques: 4.00, tpe: 368.89, bonsAchat: 0, avoir: 0 },
-            '2026-06-01': { especes: 1463.71, cheques: 4.00, tpe: 91.71, bonsAchat: 0, avoir: 0 },
-  '2026-06-02': { especes: 2797.17, cheques: 4.00, tpe: 509.27, bonsAchat: 0, avoir: 0 },
-  '2026-06-03': { especes: 2175.50, cheques: 3.00, tpe: 334.90, bonsAchat: 0, avoir: 0 },
-  '2026-06-04': { especes: 2282.52, cheques: 4.00, tpe: 469.79, bonsAchat: 0, avoir: 0 },
-  '2026-06-05': { especes: 2760.36, cheques: 4.00, tpe: 860.36, bonsAchat: 0, avoir: 0 },
-  '2026-06-06': { especes: 2579.34, cheques: 4.00, tpe: 552.69, bonsAchat: 0, avoir: 0 },
-  '2026-06-07': { especes: 1994.50, cheques: 4.00, tpe: 441.05, bonsAchat: 0, avoir: 0 },
-  '2026-06-08': { especes: 1689.00, cheques: 3.00, tpe: 528.55, bonsAchat: 0, avoir: 0 },
-  '2026-06-09': { especes: 1952.44, cheques: 3.00, tpe: 488.44, bonsAchat: 0, avoir: 0 },
-  '2026-06-10': { especes: 2328.48, cheques: 4.00, tpe: 524.18, bonsAchat: 0, avoir: 0 },
-  '2026-06-11': { especes: 1400.43, cheques: 3.00, tpe: 500.38, bonsAchat: 0, avoir: 0 },
-  '2026-06-12': { especes: 2935.52, cheques: 4.00, tpe: 923.32, bonsAchat: 0, avoir: 0 },
-  '2026-06-13': { especes: 2240.14, cheques: 5.00, tpe: 72.04, bonsAchat: 0, avoir: 0 },
-  '2026-06-14': { especes: 1943.91, cheques: 4.00, tpe: 278.61, bonsAchat: 0, avoir: 0 },
-  '2026-06-15': { especes: 2036.28, cheques: 3.00, tpe: 981.92, bonsAchat: 0, avoir: 0 },
-  '2026-06-16': { especes: 2473.53, cheques: 4.00, tpe: 381.53, bonsAchat: 0, avoir: 0 },
-  '2026-06-17': { especes: 3335.51, cheques: 6.00, tpe: 201.11, bonsAchat: 0, avoir: 0 },
-  '2026-06-18': { especes: 2831.32, cheques: 4.00, tpe: 976.97, bonsAchat: 0, avoir: 0 },
-  '2026-06-19': { especes: 2088.28, cheques: 4.00, tpe: 749.38, bonsAchat: 0, avoir: 0 },
-  '2026-06-20': { especes: 2446.43, cheques: 4.00, tpe: 173.73, bonsAchat: 0, avoir: 0 },
-  '2026-06-21': { especes: 2044.11, cheques: 4.00, tpe: 329.95, bonsAchat: 0, avoir: 0 },
-  '2026-06-22': { especes: 2086.75, cheques: 4.00, tpe: 363.74, bonsAchat: 0, avoir: 0 },
-  '2026-06-23': { especes: 1355.39, cheques: 2.00, tpe: 688.69, bonsAchat: 0, avoir: 0 },
-  '2026-06-24': { especes: 2047.21, cheques: 4.00, tpe: 111.81, bonsAchat: 0, avoir: 0 },
-  '2026-06-25': { especes: 2384.70, cheques: 3.00, tpe: 732.98, bonsAchat: 0, avoir: 0 },
-  '2026-06-26': { especes: 1565.61, cheques: 3.00, tpe: 505.91, bonsAchat: 0, avoir: 0 },
-  '2026-06-27': { especes: 2651.28, cheques: 4.00, tpe: 594.28, bonsAchat: 0, avoir: 0 },
-  '2026-06-28': { especes: 1727.16, cheques: 4.00, tpe: 477.96, bonsAchat: 0, avoir: 0 },
-  '2026-06-29': { especes: 2326.50, cheques: 4.00, tpe: 698.00, bonsAchat: 0, avoir: 0 },
-  '2026-06-30': { especes: 2008.42, cheques: 3.00, tpe: 572.67, bonsAchat: 0, avoir: 0 },
-};
+            '2026-06-01': { especes: 1463.71, cheques: 0.00, tpe: 1939.00, bonsAchat: 510.50, avoir: 0 },
+  '2026-06-02': { especes: 2797.17, cheques: 0.00, tpe: 1514.55, bonsAchat: 112.55, avoir: 0 },
+  '2026-06-03': { especes: 2175.50, cheques: 0.00, tpe: 880.90, bonsAchat: 166.40, avoir: 0 },
+  '2026-06-04': { especes: 2282.52, cheques: 0.00, tpe: 1854.77, bonsAchat: 204.20, avoir: 0 },
+  '2026-06-05': { especes: 2760.36, cheques: 0.00, tpe: 1644.15, bonsAchat: 380.35, avoir: 0 },
+  '2026-06-06': { especes: 2579.34, cheques: 0.00, tpe: 1562.75, bonsAchat: 343.60, avoir: 0 },
+  '2026-06-07': { especes: 1994.50, cheques: 0.00, tpe: 1974.55, bonsAchat: 423.00, avoir: 0 },
+  '2026-06-08': { especes: 1689.00, cheques: 0.00, tpe: 1460.55, bonsAchat: 300.00, avoir: 0 },
+  '2026-06-09': { especes: 1952.44, cheques: 0.00, tpe: 1351.00, bonsAchat: 149.20, avoir: 0 },
+  '2026-06-10': { especes: 2328.48, cheques: 0.00, tpe: 1428.70, bonsAchat: 555.80, avoir: 0 },
+  '2026-06-11': { especes: 1400.43, cheques: 0.00, tpe: 1598.55, bonsAchat: 325.00, avoir: 0 },
+  '2026-06-12': { especes: 2935.52, cheques: 0.00, tpe: 1556.20, bonsAchat: 431.60, avoir: 0 },
+  '2026-06-13': { especes: 2240.14, cheques: 25.50, tpe: 2544.60, bonsAchat: 240.80, avoir: 0 },
+  '2026-06-14': { especes: 1943.91, cheques: 0.00, tpe: 1941.30, bonsAchat: 317.90, avoir: 0 },
+  '2026-06-15': { especes: 2036.28, cheques: 0.00, tpe: 1471.80, bonsAchat: 437.09, avoir: 0 },
+  '2026-06-16': { especes: 2473.53, cheques: 0.00, tpe: 1593.60, bonsAchat: 204.60, avoir: 0 },
+  '2026-06-17': { especes: 3335.51, cheques: 0.00, tpe: 2519.15, bonsAchat: 192.95, avoir: 0 },
+  '2026-06-18': { especes: 2831.32, cheques: 0.00, tpe: 1646.75, bonsAchat: 451.90, avoir: 0 },
+  '2026-06-19': { especes: 2088.28, cheques: 5.00, tpe: 2235.90, bonsAchat: 349.50, avoir: 0 },
+  '2026-06-20': { especes: 2446.43, cheques: 0.00, tpe: 1340.00, bonsAchat: 302.10, avoir: 0 },
+  '2026-06-21': { especes: 2044.10, cheques: 64.60, tpe: 1933.25, bonsAchat: 147.00, avoir: 0 },
+  '2026-06-22': { especes: 2086.75, cheques: 0.00, tpe: 1688.89, bonsAchat: 543.00, avoir: 0 },
+  '2026-06-23': { especes: 1355.39, cheques: 0.00, tpe: 700.90, bonsAchat: 599.80, avoir: 0 },
+  '2026-06-24': { especes: 2047.21, cheques: 0.00, tpe: 1756.50, bonsAchat: 68.40, avoir: 0 },
+  '2026-06-25': { especes: 2384.70, cheques: 0.00, tpe: 788.28, bonsAchat: 391.90, avoir: 0 },
+  '2026-06-26': { especes: 1565.61, cheques: 0.00, tpe: 1541.30, bonsAchat: 119.50, avoir: 0 },
+  '2026-06-27': { especes: 2651.28, cheques: 0.00, tpe: 1594.10, bonsAchat: 132.50, avoir: 0 },
+  '2026-06-28': { especes: 1727.16, cheques: 0.00, tpe: 2282.30, bonsAchat: 372.20, avoir: 0 },
+  '2026-06-29': { especes: 2326.50, cheques: 30.00, tpe: 1999.50, bonsAchat: 319.50, avoir: 0 },
+  '2026-06-30': { especes: 2008.42, cheques: 42.25, tpe: 1227.65, bonsAchat: 247.15, avoir: 0 }
 
 app.post('/api/seed-juin-2026', (req, res) => {
   const d = db.prepare('SELECT id, societe_id FROM dossiers WHERE nom = ?').get('ANIMAL');
   if (!d) return res.status(404).json({ error: 'Dossier ANIMAL not found' });
 
   const existing = db.prepare('SELECT COUNT(*) as c FROM factures WHERE dossier_id = ?').get(d.id);
-  if (existing.c > 0) return res.json({ ok: true, message: 'Already seeded', count: existing.c });
+  if (existing.c > 0) {
+    db.prepare('DELETE FROM ecritures WHERE dossier_id = ?').run(d.id);
+    db.prepare('DELETE FROM factures WHERE dossier_id = ?').run(d.id);
+  }
 
   const insertF = db.prepare('INSERT INTO factures (id, dossier_id, societe_id, date_facture, numero_facture, client, total_ht_0, total_ht_19, tva_19, timbre, total_ttc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
   const insertE = db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte, sens, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
