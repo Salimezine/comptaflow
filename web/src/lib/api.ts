@@ -32,6 +32,7 @@ export const api = {
   getFactures: (did: string) => req<any[]>(`/dossiers/${did}/factures`),
   addFacture: (did: string, d: any) => req<any>(`/dossiers/${did}/factures`, { method: 'POST', body: JSON.stringify(d) }),
   deleteFacture: (fid: string) => req<any>(`/factures/${fid}`, { method: 'DELETE' }),
+  deleteAllFactures: (did: string) => req<any>(`/dossiers/${did}/factures`, { method: 'DELETE' }),
   generateVTJC: (did: string, modes?: any) => req<any>(`/dossiers/${did}/generate-vtjc`, { method: 'POST', body: JSON.stringify({ modes: modes || {} }) }),
   getRapport: (did: string) => req<any[]>(`/dossiers/${did}/rapport`),
   deleteRapport: (did: string) => req<any>(`/dossiers/${did}/rapport`, { method: 'DELETE' }),

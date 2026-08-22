@@ -69,6 +69,11 @@ export default function DossierPage() {
     await api.deleteFacture(fid);
     reload();
   };
+  const delAllFactures = async () => {
+    if (!id || !confirm('Supprimer TOUTES les factures + écritures VT J.C ?')) return;
+    await api.deleteAllFactures(id);
+    reload();
+  };
 
   const generateVTJC = async () => {
     if (!id) return;
@@ -144,6 +149,7 @@ export default function DossierPage() {
               <button onClick={generateVTJC} disabled={generating || !factures.length} className="bg-violet-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1">
                 <Zap className="w-4 h-4" /> {generating ? 'Generation...' : 'Generer VT J.C'}
               </button>
+              {factures.length > 0 && <button onClick={delAllFactures} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1"><Trash2 className="w-4 h-4" /> Supprimer tout</button>}
             </div>
           </div>
 

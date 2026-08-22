@@ -365,6 +365,13 @@ app.delete('/api/factures/:fid', (req, res) => {
   res.json({ ok: true });
 });
 
+app.delete('/api/dossiers/:did/factures', (req, res) => {
+  db.prepare('DELETE FROM factures WHERE dossier_id = ?').run(req.params.did);
+  db.prepare("DELETE FROM ecritures WHERE dossier_id = ? AND journal_code = 'VT J.C'").run(req.params.did);
+  db.prepare('UPDATE dossiers SET nb_ecritures = 0 WHERE id = ?').run(req.params.did);
+  res.json({ ok: true });
+});
+
 // --- RAPPORT MODES (Vente par jour) ---
 app.get('/api/dossiers/:did/rapport', (req, res) => {
   res.json(db.prepare('SELECT * FROM rapport_modes WHERE dossier_id = ? ORDER BY date_jour').all(req.params.did));
