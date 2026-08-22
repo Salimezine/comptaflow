@@ -3,10 +3,11 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  base: '/comptaflow/',
   server: {
     port: 3000,
     proxy: {
-      '/api': 'http://localhost:8787',
+      '/api': 'http://localhost:3001',
     },
   },
 });
