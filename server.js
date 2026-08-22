@@ -461,21 +461,20 @@ app.post('/api/dossiers/:did/generate-vtjc', (req, res) => {
       const dbRapport = db.prepare('SELECT especes, cheques, tpe, bonsAchat, avoir FROM rapport_modes WHERE dossier_id = ? AND date_jour = ?').get(did, date);
       const modes = (req.body.modes && req.body.modes[date]) || dbRapport || RAPPORT_MODES_JUIN[date] || { especes: totalTTC, tpe: 0, cheques: 0, bonsAchat: 0, avoir: 0 };
 
-      const debitSum = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0) + (modes.bonsAchat || 0);
-      const avoir = modes.avoir || 0;
-      const creditSum = tva19 + timbres + totalHT0 + totalHT19 + avoir;
+      const avoir709 = (modes.bonsAchat || 0) + (modes.avoir || 0);
+      const debitSum = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0);
+      const creditSum = tva19 + timbres + totalHT0 + totalHT19 + avoir709;
       const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
 
       const lines = [];
       if ((modes.especes || 0) > 0) lines.push({ compte: '411004', montant: Math.round(modes.especes * 1000) / 1000, sens: 'D' });
       if ((modes.tpe || 0) > 0) lines.push({ compte: '411005', montant: Math.round(modes.tpe * 1000) / 1000, sens: 'D' });
       if ((modes.cheques || 0) > 0) lines.push({ compte: '411003', montant: Math.round(modes.cheques * 1000) / 1000, sens: 'D' });
-      if ((modes.bonsAchat || 0) > 0) lines.push({ compte: '411006', montant: Math.round(modes.bonsAchat * 1000) / 1000, sens: 'D' });
       if (tva19 > 0) lines.push({ compte: '436711', montant: tva19, sens: 'C' });
       lines.push({ compte: '437500', montant: timbres, sens: 'C' });
       if (totalHT0 > 0) lines.push({ compte: '707200', montant: totalHT0, sens: 'C' });
       if (totalHT19 > 0) lines.push({ compte: '707219', montant: totalHT19, sens: 'C' });
-      if (avoir > 0) lines.push({ compte: '709500', montant: Math.round(avoir * 1000) / 1000, sens: 'C' });
+      if (avoir709 > 0) lines.push({ compte: '709500', montant: Math.round(avoir709 * 1000) / 1000, sens: 'C' });
       if (ecart !== 0) lines.push({ compte: '634500', montant: Math.abs(ecart), sens: ecart > 0 ? 'C' : 'D' });
 
       for (const { compte, montant, sens } of lines) {
@@ -600,20 +599,19 @@ app.post('/api/seed-juin-2026', (req, res) => {
       
       const rapport = RAPPORT_MODES_JUIN[date] || { especes: totalTTC, cheques: 0, tpe: 0, bonsAchat: 0, avoir: 0 };
 
-      const debitSum = (rapport.especes || 0) + (rapport.tpe || 0) + (rapport.cheques || 0) + (rapport.bonsAchat || 0);
-      const avoir = rapport.avoir || 0;
-      const creditSum = tva19 + timbres + totalHT0 + totalHT19 + avoir;
+      const avoir709 = (rapport.bonsAchat || 0) + (rapport.avoir || 0);
+      const debitSum = (rapport.especes || 0) + (rapport.tpe || 0) + (rapport.cheques || 0);
+      const creditSum = tva19 + timbres + totalHT0 + totalHT19 + avoir709;
       const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
 
       if ((rapport.especes || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', 'D', rapport.especes, null);
       if ((rapport.tpe || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411005', 'D', rapport.tpe, null);
       if ((rapport.cheques || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411003', 'D', rapport.cheques, null);
-      if ((rapport.bonsAchat || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411006', 'D', rapport.bonsAchat, null);
       if (totalHT0 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707200', 'C', totalHT0, null);
       if (totalHT19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707219', 'C', totalHT19, null);
       if (tva19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '436711', 'C', tva19, null);
       insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '437500', 'C', timbres, null);
-      if (avoir > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '709500', 'C', avoir, null);
+      if (avoir709 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '709500', 'C', avoir709, null);
       if (ecart !== 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '634500', ecart > 0 ? 'C' : 'D', Math.abs(ecart), null);
     }
 
