@@ -15,6 +15,7 @@
     "better-sqlite3": "^13.0.3",
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "multer": "^2.2.0"
+    "multer": "^2.2.0",
+    "pdfjs-dist": "^4.0.379"
   }
 }

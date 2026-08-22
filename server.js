@@ -23,7 +23,7 @@ function genId() { return crypto.randomBytes(8).toString('hex'); }
 
 // --- PDF TEXT EXTRACTION (server-side) ---
 async function extractTextFromPDF(filePath) {
-  const pdfjsLib = await import('./web/node_modules/pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const data = new Uint8Array(fs.readFileSync(filePath));
   const doc = await pdfjsLib.getDocument({ data }).promise;
   let fullText = '';
