@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Upload, Plus, Trash2, Download, ArrowLeft, FileText, Zap } from 'lucide-react';
+import { Upload, Plus, Trash2, Download, ArrowLeft, FileText, Zap, Loader2 } from 'lucide-react';
 import { api } from '../lib/api';
+import { processFile } from '../lib/ocr';
 
 export default function DossierPage() {
   const { id } = useParams<{ id: string }>();
@@ -12,6 +13,7 @@ export default function DossierPage() {
   const [tab, setTab] = useState<'factures' | 'ecritures' | 'pieces'>('factures');
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [generating, setGenerating] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -37,9 +39,33 @@ export default function DossierPage() {
   const handleUpload = async (files: FileList | null) => {
     if (!files?.length || !id) return;
     setUploading(true);
-    try { await api.upload(id, Array.from(files)); await reload(); }
-    catch (e: any) { alert('Erreur: ' + e.message); }
-    finally { setUploading(false); }
+    setOcrProgress('Upload en cours...');
+    try {
+      await api.upload(id, Array.from(files));
+      setOcrProgress('OCR en cours sur ' + files.length + ' fichier(s)...');
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setOcrProgress('Traitement de ' + file.name + ' (' + (i + 1) + '/' + files.length + ')...');
+        try {
+          const extracted = await processFile(file);
+          await api.addFacture(id, {
+            date_facture: extracted.date_facture,
+            numero_facture: extracted.numero_facture,
+            client: extracted.client,
+            total_ht_0: extracted.total_ht_0,
+            total_ht_19: extracted.total_ht_19,
+            tva_19: extracted.tva_19,
+            timbre: extracted.timbre,
+            total_ttc: extracted.total_ttc,
+          });
+        } catch (e: any) {
+          console.error('OCR error for ' + file.name + ':', e);
+        }
+      }
+      setOcrProgress('Termine!');
+      await reload();
+    } catch (e: any) { alert('Erreur: ' + e.message); }
+    finally { setUploading(false); setTimeout(() => setOcrProgress(''), 2000); }
   };
 
   const addFacture = async () => {
