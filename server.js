@@ -271,6 +271,60 @@ app.post('/api/dossiers/:did/generate-vtjc', (req, res) => {
   res.json({ days: allEntries.length, entries: allEntries });
 });
 
+// --- SEED JUNE 2026 ---
+const JUIN_2026_DATA = [["2026/331","2026-06-01","99",3127.906,659.924,125.386,1.0,3914.22],["2026/333","2026-06-02","111",171.0,28.571,5.428,1.0,206.0],["2026/334","2026-06-02","99",3257.868,807.903,153.502,1.0,4220.27],["2026/336","2026-06-03","99",2391.302,698.74,132.761,1.0,3223.8],["2026/338","2026-06-04","99",2895.188,1215.378,230.922,1.0,4342.49],["2026/340","2026-06-05","99",3524.578,1030.509,195.797,1.0,4751.88],["2026/342","2026-06-06","99",3708.984,652.697,124.012,1.0,4486.69],["2026/344","2026-06-07","99",2898.148,1275.973,242.435,1.0,4417.56],["2026/347","2026-06-08","99",2879.048,479.414,91.089,1.0,3450.55],["2026/349","2026-06-09","99",2646.136,652.104,123.9,1.0,3423.14],["2026/351","2026-06-10","99",3536.484,652.523,123.979,1.0,4313.99],["2026/353","2026-06-11","99",2583.887,621.937,118.168,1.0,3324.99],["2026/356","2026-06-12","99",3969.01,801.939,152.368,1.0,4924.32],["2026/358","2026-06-13","99",3811.04,989.921,188.085,1.0,4990.05],["2026/360","2026-06-14","122",319.0,21.429,4.072,1.0,345.5],["2026/361","2026-06-14","99",2814.414,814.878,154.827,1.0,3785.12],["2026/363","2026-06-15","99",2452.36,1254.458,238.347,1.0,3946.17],["2026/364","2026-06-16","99",3485.033,661.094,125.608,1.0,4272.74],["2026/365","2026-06-17","99",4812.914,1037.571,197.138,1.0,6048.62],["2026/366","2026-06-18","102",717.0,0,0,1.0,718.0],["2026/367","2026-06-18","99",3110.988,926.051,175.95,1.0,4213.99],["2026/368","2026-06-19","99",3512.074,980.335,186.264,1.0,4679.67],["2026/369","2026-06-20","99",2989.332,923.702,175.503,1.0,4089.54],["2026/371","2026-06-21","99",3453.156,618.322,117.481,1.0,4189.96],["2026/373","2026-06-22","99",3291.031,863.538,164.072,1.0,4319.64],["2026/375","2026-06-23","99",2200.69,363.362,69.039,1.0,2634.09],["2026/377","2026-06-24","99",2838.909,868.238,164.965,1.0,3873.11],["2026/379","2026-06-25","99",2635.39,781.093,148.408,1.0,3565.89],["2026/381","2026-06-26","99",2447.91,654.201,124.298,1.0,3227.41],["2026/383","2026-06-27","99",3231.183,980.254,186.248,1.0,4398.69],["2026/385","2026-06-28","113",75.0,72.268,13.731,1.0,162.0],["2026/386","2026-06-28","99",3219.566,841.266,159.841,1.0,4221.67],["2026/388","2026-06-29","99",3856.605,688.152,130.749,1.0,4676.51],["2026/390","2026-06-30","99",2678.115,676.558,128.546,1.0,3484.22]];
+
+app.post('/api/seed-juin-2026', (req, res) => {
+  const d = db.prepare('SELECT id, societe_id FROM dossiers WHERE nom = ?').get('ANIMAL');
+  if (!d) return res.status(404).json({ error: 'Dossier ANIMAL not found' });
+
+  const existing = db.prepare('SELECT COUNT(*) as c FROM factures WHERE dossier_id = ?').get(d.id);
+  if (existing.c > 0) return res.json({ ok: true, message: 'Already seeded', count: existing.c });
+
+  const insertF = db.prepare('INSERT INTO factures (id, dossier_id, societe_id, date_facture, numero_facture, client, total_ht_0, total_ht_19, tva_19, timbre, total_ttc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  const insertE = db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte_debit, compte_credit, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+
+  const txn = db.transaction(() => {
+    for (const [num, date, client, ht0, ht19, tva, timbre, ttc] of JUIN_2026_DATA) {
+      insertF.run(genId(), d.id, d.societe_id, date, num, client, ht0, ht19, tva, timbre, ttc);
+    }
+
+    const byDay = {};
+    for (const [num, date, client, ht0, ht19, tva, timbre, ttc] of JUIN_2026_DATA) {
+      if (!byDay[date]) byDay[date] = [];
+      byDay[date].push({ num, client, ht0, ht19, tva, ttc });
+    }
+
+    for (const [date, dayF] of Object.entries(byDay)) {
+      const nums = dayF.map(f => f.num.split('/')[1]).sort((a, b) => a - b);
+      const numPiece = nums.length === 1 ? 'FAC N' + nums[0] + '-26' : 'FAC N' + nums.join('-') + '-26';
+      const clients = [...new Set(dayF.map(f => f.client).filter(Boolean))];
+      const libelle = clients.length > 0 ? 'CLTS PASSAGERS/' + clients.join('/') : 'CLTS PASSAGERS';
+      const totalHT0 = dayF.reduce((s, f) => s + f.ht0, 0);
+      const totalHT19 = dayF.reduce((s, f) => s + f.ht19, 0);
+      const tva19 = dayF.reduce((s, f) => s + f.tva, 0);
+      const timbres = dayF.length;
+      const totalTTC = dayF.reduce((s, f) => s + f.ttc, 0);
+      const especes = totalTTC;
+      const creditSum = tva19 + timbres + totalHT0 + totalHT19;
+      const ecart = Math.round((especes - creditSum) * 1000) / 1000;
+
+      insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '411004', 0, null);
+      if (especes > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '411004', especes, null);
+      if (totalHT0 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '707200', totalHT0, null);
+      if (totalHT19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '707219', totalHT19, null);
+      insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '436711', tva19, null);
+      insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '437500', timbres, null);
+      if (ecart !== 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', '634500', Math.abs(ecart), null);
+    }
+
+    db.prepare('UPDATE dossiers SET nb_ecritures = (SELECT COUNT(*) FROM ecritures WHERE dossier_id = ?) WHERE id = ?').run(d.id, d.id);
+  });
+
+  txn();
+  res.json({ ok: true, factures: JUIN_2026_DATA.length });
+});
+
 // --- DASHBOARD ---
 app.get('/api/dashboard', (req, res) => {
   const s = db.prepare('SELECT COUNT(*) as c FROM societes').get();
