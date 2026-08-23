@@ -60,8 +60,11 @@ async function extractTextFromPDF(filePath) {
 function parseRapport(text) {
   const modes = {};
   const p = s => parseFloat(s.replace(/ /g, '').replace(',', '.')) || 0;
+  const num = '\\d[\\d ]*\\d,\\d+|\\d,\\d+';
+  const sep = '\\s*[|]?\\s*';
+  const re = new RegExp('(\\d{2})\\/(\\d{2})\\/(\\d{4})' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')');
   for (const line of text.split('\n')) {
-    const m = line.match(/(\d{2})\/(\d{2})\/(\d{4})\s*[|]\s*([\d ,.]+)\s*[|]\s*([\d ,.]+)\s*[|]\s*([\d ,.]+)\s*[|]\s*([\d ,.]+)\s*[|]\s*([\d ,.]+)\s*[|]\s*([\d ,.]+)/);
+    const m = line.match(re);
     if (!m) continue;
     const date = m[3] + '-' + m[2] + '-' + m[1];
     modes[date] = {
