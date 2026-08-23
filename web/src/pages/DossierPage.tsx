@@ -166,6 +166,30 @@ export default function DossierPage() {
             </div>
           </div>
 
+          {factures.length > 0 && (
+            <div className="bg-white rounded-xl border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
+                  <th className="px-4 py-3">Date</th><th className="px-4 py-3">N Facture</th><th className="px-4 py-3">Client</th><th className="px-4 py-3 text-right">HT 0%</th><th className="px-4 py-3 text-right">HT 19%</th><th className="px-4 py-3 text-right">TVA</th><th className="px-4 py-3 text-right">TTC</th><th className="px-4 py-3"></th>
+                </tr></thead>
+                <tbody className="divide-y divide-gray-100">
+                  {factures.map(f => (
+                    <tr key={f.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-2">{f.date_facture}</td>
+                      <td className="px-4 py-2 font-mono text-xs">{f.numero_facture}</td>
+                      <td className="px-4 py-2">{f.client || '-'}</td>
+                      <td className="px-4 py-2 text-right font-mono">{(f.total_ht_0 || 0).toFixed(3)}</td>
+                      <td className="px-4 py-2 text-right font-mono">{(f.total_ht_19 || 0).toFixed(3)}</td>
+                      <td className="px-4 py-2 text-right font-mono">{(f.tva_19 || 0).toFixed(3)}</td>
+                      <td className="px-4 py-2 text-right font-mono font-medium">{(f.total_ttc || 0).toFixed(3)}</td>
+                      <td className="px-4 py-2"><button onClick={() => delFacture(f.id)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           {vtjcResult && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
               <div className="flex justify-between items-center mb-2">
@@ -183,6 +207,8 @@ export default function DossierPage() {
                     </div>
                   ))}
                 </div>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -265,32 +291,6 @@ export default function DossierPage() {
                 </table>
               </div>
             </>
-          )}
-        </div>
-      )}
-
-          {factures.length > 0 && (
-            <div className="bg-white rounded-xl border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
-                  <th className="px-4 py-3">Date</th><th className="px-4 py-3">N Facture</th><th className="px-4 py-3">Client</th><th className="px-4 py-3 text-right">HT 0%</th><th className="px-4 py-3 text-right">HT 19%</th><th className="px-4 py-3 text-right">TVA</th><th className="px-4 py-3 text-right">TTC</th><th className="px-4 py-3"></th>
-                </tr></thead>
-                <tbody className="divide-y divide-gray-100">
-                  {factures.map(f => (
-                    <tr key={f.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-2">{f.date_facture}</td>
-                      <td className="px-4 py-2 font-mono text-xs">{f.numero_facture}</td>
-                      <td className="px-4 py-2">{f.client || '-'}</td>
-                      <td className="px-4 py-2 text-right font-mono">{(f.total_ht_0 || 0).toFixed(3)}</td>
-                      <td className="px-4 py-2 text-right font-mono">{(f.total_ht_19 || 0).toFixed(3)}</td>
-                      <td className="px-4 py-2 text-right font-mono">{(f.tva_19 || 0).toFixed(3)}</td>
-                      <td className="px-4 py-2 text-right font-mono font-medium">{(f.total_ttc || 0).toFixed(3)}</td>
-                      <td className="px-4 py-2"><button onClick={() => delFacture(f.id)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           )}
         </div>
       )}
