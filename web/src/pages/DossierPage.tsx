@@ -247,7 +247,7 @@ export default function DossierPage() {
         <div className="space-y-4">
           <div className="bg-white rounded-xl border p-5">
             <h2 className="font-semibold mb-2">Rapport Vente par jour</h2>
-            <p className="text-xs text-gray-500 mb-3">Upload le PDF "Vente par jour" (JDC) — cas séparé des factures. Ventilation: Espèce→411004 / Chèque→411003 / Carte→411005 / Bons D'ach→709500 / Crédit→411006.</p>
+            <p className="text-xs text-gray-500 mb-3">Upload le PDF "Vente par jour" (JDC) — cas séparé des factures. Ventilation: Espèce→411004 / Chèque→411003 / Carte→411005 / Bons D'ach→709500. Crédit affiché pour info (déjà dans les factures).</p>
             <input ref={rapportRef} type="file" accept=".pdf" className="hidden" onChange={e => handleRapport(e.target.files)} />
             <div className="flex gap-2">
               <button onClick={() => rapportRef.current?.click()} className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 flex items-center gap-1.5"><Upload className="w-4 h-4" /> Choisir rapport PDF</button>

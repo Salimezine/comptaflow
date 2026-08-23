@@ -352,7 +352,7 @@ app.get('/api/dossiers/:did/export', (req, res) => {
   const diff = Math.round((totalD - totalC) * 1000) / 1000;
   if (Math.abs(diff) > 0.001) anomalies.push('DESEQUILIBRE: D=' + totalD.toFixed(3) + ' C=' + totalC.toFixed(3) + ' diff=' + diff.toFixed(3));
 
-  const EXPORT_SENS = { '707200': 'C', '707219': 'C', '436711': 'C', '437500': 'C', '709500': 'D', '411006': 'D' };
+  const EXPORT_SENS = { '707200': 'C', '707219': 'C', '436711': 'C', '437500': 'C', '709500': 'D' };
   for (const e of rows) {
     if (e.montant === 0) continue;
     const expected = EXPORT_SENS[e.compte];
@@ -483,7 +483,7 @@ app.post('/api/dossiers/:did/generate-vtjc', (req, res) => {
       const modes = (req.body.modes && req.body.modes[date]) || dbRapport || RAPPORT_MODES_JUIN[date] || { especes: totalTTC, tpe: 0, cheques: 0, bonsAchat: 0, avoir: 0, credit: 0 };
 
       const avoir709 = (modes.bonsAchat || 0) + (modes.avoir || 0);
-      const debitSum = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0) + avoir709 + (modes.credit || 0);
+      const debitSum = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0) + avoir709;
       const creditSum = tva19 + timbres + totalHT0 + totalHT19;
       const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
 
@@ -491,7 +491,6 @@ app.post('/api/dossiers/:did/generate-vtjc', (req, res) => {
       if ((modes.especes || 0) > 0) lines.push({ compte: '411004', montant: Math.round(modes.especes * 1000) / 1000, sens: 'D' });
       if ((modes.tpe || 0) > 0) lines.push({ compte: '411005', montant: Math.round(modes.tpe * 1000) / 1000, sens: 'D' });
       if ((modes.cheques || 0) > 0) lines.push({ compte: '411003', montant: Math.round(modes.cheques * 1000) / 1000, sens: 'D' });
-      if ((modes.credit || 0) > 0) lines.push({ compte: '411006', montant: Math.round(modes.credit * 1000) / 1000, sens: 'D' });
       if (tva19 > 0) lines.push({ compte: '436711', montant: tva19, sens: 'C' });
       lines.push({ compte: '437500', montant: timbres, sens: 'C' });
       if (totalHT0 > 0) lines.push({ compte: '707200', montant: totalHT0, sens: 'C' });
@@ -633,14 +632,13 @@ app.post('/api/seed-juin-2026', (req, res) => {
       const rapport = RAPPORT_MODES_JUIN[date] || { especes: totalTTC, cheques: 0, tpe: 0, bonsAchat: 0, avoir: 0, credit: 0 };
 
       const avoir709 = (rapport.bonsAchat || 0) + (rapport.avoir || 0);
-      const debitSum = (rapport.especes || 0) + (rapport.tpe || 0) + (rapport.cheques || 0) + avoir709 + (rapport.credit || 0);
+      const debitSum = (rapport.especes || 0) + (rapport.tpe || 0) + (rapport.cheques || 0) + avoir709;
       const creditSum = tva19 + timbres + totalHT0 + totalHT19;
       const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
 
       if ((rapport.especes || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', 'D', rapport.especes, null);
       if ((rapport.tpe || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411005', 'D', rapport.tpe, null);
       if ((rapport.cheques || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411003', 'D', rapport.cheques, null);
-      if ((rapport.credit || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411006', 'D', rapport.credit, null);
       if (totalHT0 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707200', 'C', totalHT0, null);
       if (totalHT19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707219', 'C', totalHT19, null);
       if (tva19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '436711', 'C', tva19, null);
@@ -722,13 +720,12 @@ app.listen(PORT, '0.0.0.0', () => {
             const timbres = dayF.reduce((s, f) => s + (f.timbre || 1), 0);
             const rapport = RAPPORT_MODES_JUIN[date] || { especes: totalTTC, cheques: 0, tpe: 0, bonsAchat: 0, avoir: 0, credit: 0 };
             const avoir709 = (rapport.bonsAchat || 0) + (rapport.avoir || 0);
-            const debitSum = (rapport.especes || 0) + (rapport.tpe || 0) + (rapport.cheques || 0) + avoir709 + (rapport.credit || 0);
+            const debitSum = (rapport.especes || 0) + (rapport.tpe || 0) + (rapport.cheques || 0) + avoir709;
             const creditSum = tva19 + timbres + totalHT0 + totalHT19;
             const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
             if ((rapport.especes || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', 'D', rapport.especes, null);
             if ((rapport.tpe || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411005', 'D', rapport.tpe, null);
             if ((rapport.cheques || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411003', 'D', rapport.cheques, null);
-            if ((rapport.credit || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411006', 'D', rapport.credit, null);
             if (totalHT0 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707200', 'C', totalHT0, null);
             if (totalHT19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707219', 'C', totalHT19, null);
             if (tva19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '436711', 'C', tva19, null);
