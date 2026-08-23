@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Upload, Plus, Trash2, Download, ArrowLeft, FileText, Zap, Loader2, AlertTriangle, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { api } from '../lib/api';
 
 export default function DossierPage() {
@@ -118,7 +119,6 @@ export default function DossierPage() {
 
   const exportXLSX = async () => {
     if (!id) return;
-    const { default: XLSX } = await import('xlsx');
     const csv = await api.exportCSV(id);
     const lines = csv.trim().split('\n');
     const headers = lines[0].split(';');
