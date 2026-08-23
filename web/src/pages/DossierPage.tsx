@@ -17,6 +17,7 @@ export default function DossierPage() {
   const [ocrProgress, setOcrProgress] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [vtjcResult, setVtjcResult] = useState<any>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
 
@@ -78,17 +79,10 @@ export default function DossierPage() {
   const generateVTJC = async () => {
     if (!id) return;
     setGenerating(true);
+    setVtjcResult(null);
     try {
       const result = await api.generateVTJC(id);
-      let msg = 'Genere! ' + result.days + ' jour(s) traite(s), ' + result.entries.length + ' ecriture(s)';
-      if (result.anomalies?.length) {
-        msg += '\n\n--- ANOMALIES (' + result.anomalies.length + ') ---\n';
-        for (const a of result.anomalies) {
-          msg += '\n' + a.date + ': ' + a.error;
-          if (a.factures) msg += '\n' + a.factures;
-        }
-      }
-      alert(msg);
+      setVtjcResult(result);
       reload();
     } catch (e: any) { alert('Erreur: ' + e.message); }
     finally { setGenerating(false); }
@@ -160,6 +154,27 @@ export default function DossierPage() {
               {factures.length > 0 && <button onClick={delAllFactures} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1"><Trash2 className="w-4 h-4" /> Supprimer tout</button>}
             </div>
           </div>
+
+          {vtjcResult && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="font-semibold text-blue-800">Resultat Generation VT J.C</h3>
+                <button onClick={() => setVtjcResult(null)} className="text-blue-400 hover:text-blue-600 text-sm">Fermer</button>
+              </div>
+              <p className="text-sm text-blue-700">{vtjcResult.days} jour(s) traite(s), {vtjcResult.entries?.filter((e: any) => !e.excluded).length || 0} ecriture(s)</p>
+              {vtjcResult.anomalies?.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-sm font-semibold text-red-700 mb-1">Jours exclus (ecart {">"} 3DT) :</p>
+                  {vtjcResult.anomalies.map((a: any, i: number) => (
+                    <div key={i} className="bg-white border border-red-200 rounded-lg p-2 mb-2">
+                      <p className="text-sm font-mono font-bold text-red-700">{a.date} — {a.error}</p>
+                      {a.factures && <pre className="text-xs text-gray-600 mt-1 whitespace-pre-wrap font-mono">{a.factures}</pre>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {factures.length > 0 && (
             <div className="bg-white rounded-xl border overflow-hidden">
