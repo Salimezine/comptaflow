@@ -30,7 +30,16 @@ const CLIENT_NAMES = { '99': 'CLTS PASSAGERS', '111': 'STE WEZIGN', '122': 'NESR
 
 function buildDayEcritures(date, dayFactures, modes, defaultLibelle) {
   if (EXCLUDED_DAYS.has(date)) {
-    return { lines: [], ecart: 0, excluded: true, anomaly: { date, error: 'Exclu: ecart > 3DT, a verifier manuellement' } };
+    const factureDetails = dayFactures.map(f => {
+      const num = f.numero_facture || f.num || '?';
+      const client = f.client || '?';
+      const ht0 = f.total_ht_0 || f.ht0 || 0;
+      const ht19 = f.total_ht_19 || f.ht19 || 0;
+      const tva = f.tva_19 || f.tva || 0;
+      const ttc = f.total_ttc || f.ttc || 0;
+      return `  ${num} | client=${client} | HT0=${ht0} HT19=${ht19} TVA=${tva} TTC=${ttc}`;
+    }).join('\n');
+    return { lines: [], ecart: 0, excluded: true, anomaly: { date, error: 'Exclu: ecart > 3DT, a verifier manuellement', factures: factureDetails } };
   }
   const get = (f, key) => f[key] || f[key.replace('total_ht_0','ht0').replace('total_ht_19','ht19').replace('tva_19','tva')] || 0;
   const totalHT0 = Math.round(dayFactures.reduce((s, f) => s + (f.ht0 || f.total_ht_0 || 0), 0) * 1000) / 1000;

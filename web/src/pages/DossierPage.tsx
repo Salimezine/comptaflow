@@ -80,7 +80,15 @@ export default function DossierPage() {
     setGenerating(true);
     try {
       const result = await api.generateVTJC(id);
-      alert('Genere! ' + result.days + ' jour(s) traite(s), ' + result.entries.length + ' ecriture(s)');
+      let msg = 'Genere! ' + result.days + ' jour(s) traite(s), ' + result.entries.length + ' ecriture(s)';
+      if (result.anomalies?.length) {
+        msg += '\n\n--- ANOMALIES (' + result.anomalies.length + ') ---\n';
+        for (const a of result.anomalies) {
+          msg += '\n' + a.date + ': ' + a.error;
+          if (a.factures) msg += '\n' + a.factures;
+        }
+      }
+      alert(msg);
       reload();
     } catch (e: any) { alert('Erreur: ' + e.message); }
     finally { setGenerating(false); }
