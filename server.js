@@ -472,6 +472,40 @@ app.delete('/api/dossiers/:did/rapport', (req, res) => {
   res.json({ ok: true });
 });
 
+// --- EXCLUDED DAYS MANAGEMENT ---
+app.get('/api/dossiers/:did/excluded', (req, res) => {
+  const did = req.params.did;
+  const factures = db.prepare('SELECT * FROM factures WHERE dossier_id = ? ORDER BY date_facture').all(did);
+  const byDay = {};
+  for (const f of factures) {
+    if (!byDay[f.date_facture]) byDay[f.date_facture] = [];
+    byDay[f.date_facture].push(f);
+  }
+  const results = [];
+  for (const [date, dayFactures] of Object.entries(byDay)) {
+    const dbRapport = db.prepare('SELECT * FROM rapport_modes WHERE dossier_id = ? AND date_jour = ?').get(did, date);
+    const modes = dbRapport || RAPPORT_MODES_JUIN[date] || { especes: 0, tpe: 0, cheques: 0, bonsAchat: 0, avoir: 0, credit: 0 };
+    const r = buildDayEcritures(date, dayFactures, modes, 'CLTS PASSAGERS');
+    const ht0 = dayFactures.reduce((s, f) => s + (f.total_ht_0 || f.ht0 || 0), 0);
+    const ht19 = dayFactures.reduce((s, f) => s + (f.total_ht_19 || f.ht19 || 0), 0);
+    const tva = dayFactures.reduce((s, f) => s + (f.tva_19 || f.tva || 0), 0);
+    const ttc = dayFactures.reduce((s, f) => s + (f.total_ttc || f.ttc || 0), 0);
+    const totalModes = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0) + (modes.bonsAchat || 0) + (modes.avoir || 0) + (modes.credit || 0);
+    const factureLines = dayFactures.map(f => ({
+      num: f.numero_facture, client: f.client, ht0: f.total_ht_0 || f.ht0 || 0,
+      ht19: f.total_ht_19 || f.ht19 || 0, tva: f.tva_19 || f.tva || 0, ttc: f.total_ttc || f.ttc || 0
+    }));
+    const proposedLines = r.excluded ? [] : r.lines.map(l => ({ compte: l.compte, sens: l.sens, montant: l.montant, libelle: l.libelle }));
+    results.push({
+      date, ecart: r.ecart, excluded: EXCLUDED_DAYS.has(date),
+      totalFactures: ttc, totalModes: totalModes, nbFactures: dayFactures.length,
+      modes: { especes: modes.especes || 0, cheques: modes.cheques || 0, tpe: modes.tpe || 0, bonsAchat: modes.bonsAchat || 0, avoir: modes.avoir || 0, credit: modes.credit || 0 },
+      factures: factureLines, proposedEcritures: proposedLines
+    });
+  }
+  res.json(results);
+});
+
 app.post('/api/dossiers/:did/rapport/bulk', (req, res) => {
   const did = req.params.did;
   const d = db.prepare('SELECT societe_id FROM dossiers WHERE id = ?').get(did);

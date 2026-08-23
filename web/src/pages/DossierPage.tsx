@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Upload, Plus, Trash2, Download, ArrowLeft, FileText, Zap, Loader2 } from 'lucide-react';
+import { Upload, Plus, Trash2, Download, ArrowLeft, FileText, Zap, Loader2, AlertTriangle } from 'lucide-react';
 import { api } from '../lib/api';
 
 export default function DossierPage() {
@@ -9,8 +9,10 @@ export default function DossierPage() {
   const [pieces, setPieces] = useState<any[]>([]);
   const [ecritures, setEcritures] = useState<any[]>([]);
   const [factures, setFactures] = useState<any[]>([]);
-  const [tab, setTab] = useState<'factures' | 'ecritures' | 'pieces' | 'rapport'>('factures');
+  const [tab, setTab] = useState<'factures' | 'ecritures' | 'pieces' | 'rapport' | 'analyse'>('factures');
   const [rapport, setRapport] = useState<any[]>([]);
+  const [analyse, setAnalyse] = useState<any[]>([]);
+  const [analyseLoading, setAnalyseLoading] = useState(false);
   const rapportRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -97,6 +99,14 @@ export default function DossierPage() {
   };
   const delRapport = async () => { if (!id || !confirm('Supprimer rapport?')) return; await api.deleteRapport(id); reload(); };
 
+  const loadAnalyse = async () => {
+    if (!id) return;
+    setAnalyseLoading(true);
+    try { const r = await api.getExcluded(id); setAnalyse(r); } catch (e: any) { alert('Erreur: ' + e.message); }
+    finally { setAnalyseLoading(false); }
+  };
+  useEffect(() => { if (tab === 'analyse' && id) loadAnalyse(); }, [tab, id]);
+
   const exportCSV = async () => {
     if (!id) return;
     const csv = await api.exportCSV(id);
@@ -124,9 +134,9 @@ export default function DossierPage() {
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        {(['factures', 'ecritures', 'pieces', 'rapport'] as const).map(t => (
+        {(['factures', 'ecritures', 'pieces', 'rapport', 'analyse'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-lg text-sm font-medium capitalize ${tab === t ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-            {t} {t === 'factures' ? `(${factures.length})` : t === 'ecritures' ? `(${ecritures.length})` : t === 'pieces' ? `(${pieces.length})` : `(${rapport.length})`}
+            {t === 'analyse' ? <><AlertTriangle className="w-3 h-3 inline mr-1" />Analyse</> : t} {t === 'factures' ? `(${factures.length})` : t === 'ecritures' ? `(${ecritures.length})` : t === 'pieces' ? `(${pieces.length})` : t === 'rapport' ? `(${rapport.length})` : ''}
           </button>
         ))}
       </div>
@@ -173,9 +183,91 @@ export default function DossierPage() {
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
           )}
+        </div>
+      )}
+
+      {/* ANALYSE */}
+      {tab === 'analyse' && (
+        <div className="space-y-4">
+          {analyseLoading ? (
+            <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
+          ) : analyse.length === 0 ? (
+            <p className="text-center text-gray-400 py-8">Aucune donnée. Ajoutez des factures d'abord.</p>
+          ) : (
+            <>
+              <div className="bg-white rounded-xl border p-5">
+                <h2 className="font-semibold mb-2 flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-amber-500" /> Analyse des écarts par jour</h2>
+                <p className="text-xs text-gray-500">Comparaison Rapport vs Factures — jours avec écart &gt; 3DT = exclus de la génération VT J.C</p>
+              </div>
+              {analyse.filter(a => Math.abs(a.ecart) > 3).length > 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                  <h3 className="font-semibold text-red-700 text-sm mb-2">Jours exclus (écart &gt; 3DT) — à vérifier manuellement :</h3>
+                  {analyse.filter(a => Math.abs(a.ecart) > 3).map((a: any) => (
+                    <details key={a.date} className="mb-3 bg-white border border-red-200 rounded-lg overflow-hidden">
+                      <summary className="px-4 py-3 cursor-pointer hover:bg-red-50 flex items-center justify-between">
+                        <span className="font-mono font-bold text-red-700">{a.date}</span>
+                        <span className="text-sm">
+                          <span className="text-red-600 font-mono font-bold">écart = {a.ecart.toFixed(3)} DT</span>
+                          <span className="text-gray-400 ml-2">| {a.nbFactures} facture(s)</span>
+                          <span className="text-gray-400 ml-2">| Factures: {a.totalFactures.toFixed(2)} | Rapport: {a.totalModes.toFixed(2)}</span>
+                        </span>
+                      </summary>
+                      <div className="px-4 pb-3 space-y-3">
+                        <div>
+                          <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Modes de paiement (Rapport) :</h4>
+                          <div className="grid grid-cols-3 gap-1 text-xs font-mono">
+                            <span>Espèce: {a.modes.especes.toFixed(2)}</span>
+                            <span>Chèque: {a.modes.cheques.toFixed(2)}</span>
+                            <span>Carte: {a.modes.tpe.toFixed(2)}</span>
+                            <span>Bons: {a.modes.bonsAchat.toFixed(2)}</span>
+                            <span>Avoir: {a.modes.avoir.toFixed(2)}</span>
+                            <span>Crédit: {a.modes.credit.toFixed(2)}</span>
+                          </div>
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Factures du jour :</h4>
+                          <table className="w-full text-xs">
+                            <thead><tr className="text-gray-400"><th className="text-left">Num</th><th className="text-left">Client</th><th className="text-right">HT0</th><th className="text-right">HT19</th><th className="text-right">TVA</th><th className="text-right">TTC</th></tr></thead>
+                            <tbody className="divide-y divide-gray-100">{a.factures.map((f: any, i: number) => <tr key={i}><td className="font-mono">{f.num}</td><td>{f.client}</td><td className="text-right font-mono">{f.ht0.toFixed(3)}</td><td className="text-right font-mono">{f.ht19.toFixed(3)}</td><td className="text-right font-mono">{f.tva.toFixed(3)}</td><td className="text-right font-mono font-medium">{f.ttc.toFixed(3)}</td></tr>)}</tbody>
+                          </table>
+                        </div>
+                        {a.proposedEcritures.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Écritures proposées (non générées) :</h4>
+                            <table className="w-full text-xs">
+                              <thead><tr className="text-gray-400"><th className="text-left">Compte</th><th className="text-left">Sens</th><th className="text-right">Montant</th><th className="text-left">Libellé</th></tr></thead>
+                              <tbody className="divide-y divide-gray-100">{a.proposedEcritures.map((l: any, i: number) => <tr key={i}><td className="font-mono">{l.compte}</td><td className={l.sens === 'D' ? 'text-emerald-600 font-bold' : 'text-blue-600 font-bold'}>{l.sens}</td><td className="text-right font-mono">{l.montant.toFixed(3)}</td><td>{l.libelle || '-'}</td></tr>)}</tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              )}
+              <div className="bg-white rounded-xl border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
+                    <th className="px-3 py-2">Date</th><th className="px-3 py-2 text-right">Factures TTC</th><th className="px-3 py-2 text-right">Rapport Total</th><th className="px-3 py-2 text-right">Écart</th><th className="px-3 py-2 text-center">Statut</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {analyse.map((a: any) => (
+                      <tr key={a.date} className={Math.abs(a.ecart) > 3 ? 'bg-red-50' : 'hover:bg-gray-50'}>
+                        <td className="px-3 py-2 font-mono text-xs">{a.date}</td>
+                        <td className="px-3 py-2 text-right font-mono">{a.totalFactures.toFixed(2)}</td>
+                        <td className="px-3 py-2 text-right font-mono">{a.totalModes.toFixed(2)}</td>
+                        <td className={`px-3 py-2 text-right font-mono font-bold ${Math.abs(a.ecart) > 3 ? 'text-red-600' : Math.abs(a.ecart) > 1 ? 'text-amber-600' : 'text-emerald-600'}`}>{a.ecart.toFixed(3)}</td>
+                        <td className="px-3 py-2 text-center">{a.excluded ? <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded">EXCLU</span> : <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-0.5 rounded">OK</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
           {factures.length > 0 && (
             <div className="bg-white rounded-xl border overflow-hidden">
