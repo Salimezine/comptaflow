@@ -22,8 +22,9 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 function genId() { return crypto.randomBytes(8).toString('hex'); }
 
 // --- PDF TEXT EXTRACTION (server-side) ---
+let pdfjsLib = null;
 async function extractTextFromPDF(filePath) {
-  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  if (!pdfjsLib) pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const data = new Uint8Array(fs.readFileSync(filePath));
   const doc = await pdfjsLib.getDocument({ data }).promise;
   let fullText = '';
@@ -255,32 +256,40 @@ app.post('/api/dossiers/:did/upload', upload.array('files', 50), (req, res) => {
 
 // --- PROCESS: Upload + OCR + Create factures ---
 app.post('/api/dossiers/:did/process', upload.array('files', 50), async (req, res) => {
-  const did = req.params.did;
-  const d = db.prepare('SELECT * FROM dossiers WHERE id = ?').get(did);
-  if (!d) return res.status(404).json({ error: 'Dossier non trouve' });
+  try {
+    const did = req.params.did;
+    const d = db.prepare('SELECT * FROM dossiers WHERE id = ?').get(did);
+    if (!d) return res.status(404).json({ error: 'Dossier non trouve' });
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Aucun fichier envoye' });
 
-  const results = [];
-  for (const f of req.files) {
-    try {
-      const text = await extractTextFromPDF(f.path);
-      const inv = parseInvoice(text);
-      if (!inv.numero) inv.numero = f.originalname.replace(/[^0-9]/g, '');
+    const results = [];
+    for (const f of req.files) {
+      try {
+        const text = await extractTextFromPDF(f.path);
+        const inv = parseInvoice(text);
+        if (!inv.numero) inv.numero = f.originalname.replace(/[^0-9]/g, '');
 
-      const fid = genId();
-      db.prepare('INSERT INTO factures (id, dossier_id, societe_id, date_facture, numero_facture, client, total_ht_0, total_ht_19, tva_19, timbre, total_ttc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(fid, did, d.societe_id, inv.date, inv.numero, inv.client, inv.ht0, inv.ht19, inv.tva19, inv.timbre, inv.ttc);
+        const fid = genId();
+        db.prepare('INSERT INTO factures (id, dossier_id, societe_id, date_facture, numero_facture, client, total_ht_0, total_ht_19, tva_19, timbre, total_ttc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(fid, did, d.societe_id, inv.date, inv.numero, inv.client, inv.ht0, inv.ht19, inv.tva19, inv.timbre, inv.ttc);
 
-      db.prepare('INSERT INTO pieces (id, dossier_id, societe_id, nom_fichier, chemin) VALUES (?, ?, ?, ?, ?)')
-        .run(genId(), did, d.societe_id, f.originalname, f.path);
+        db.prepare('INSERT INTO pieces (id, dossier_id, societe_id, nom_fichier, chemin) VALUES (?, ?, ?, ?, ?)')
+          .run(genId(), did, d.societe_id, f.originalname, f.path);
 
-      results.push({ file: f.originalname, numero: inv.numero, date: inv.date, client: inv.client, ht0: inv.ht0, ht19: inv.ht19, tva19: inv.tva19, ttc: inv.ttc, ok: true });
-    } catch (e) {
-      results.push({ file: f.originalname, error: e.message, ok: false });
+        results.push({ file: f.originalname, numero: inv.numero, date: inv.date, client: inv.client, ht0: inv.ht0, ht19: inv.ht19, tva19: inv.tva19, ttc: inv.ttc, ok: true });
+      } catch (e) {
+        results.push({ file: f.originalname, error: e.message, ok: false });
+      } finally {
+        try { fs.unlinkSync(f.path); } catch {}
+      }
     }
-  }
 
-  db.prepare('UPDATE dossiers SET nb_pieces = (SELECT COUNT(*) FROM pieces WHERE dossier_id = ?) WHERE id = ?').run(did, did);
-  res.json({ processed: results.length, results });
+    db.prepare('UPDATE dossiers SET nb_pieces = (SELECT COUNT(*) FROM pieces WHERE dossier_id = ?) WHERE id = ?').run(did, did);
+    res.json({ processed: results.length, results });
+  } catch (e) {
+    console.error('Process error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // --- LIST PIECES ---
@@ -650,7 +659,18 @@ app.get('/api/dashboard', (req, res) => {
   res.json({ stats: { societes: s.c, dossiers: d.c, ecritures: e.c }, recentDossiers: recent, animalDossierId: animal?.id || null });
 });
 
-// SPA fallback
+// SPA fallback + error handlers
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    console.error('Multer error:', err.message);
+    return res.status(400).json({ error: 'Upload error: ' + err.message });
+  }
+  next(err);
+});
+app.use((err, req, res, next) => {
+  console.error('Server error:', err.message);
+  res.status(500).json({ error: err.message || 'Internal server error' });
+});
 app.use((req, res, next) => {
   if (req.method === 'GET' && !req.path.startsWith('/api/')) {
     res.sendFile(path.join(__dirname, 'web/dist/index.html'));
