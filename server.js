@@ -335,7 +335,7 @@ app.get('/api/dossiers/:did/export', (req, res) => {
   const diff = Math.round((totalD - totalC) * 1000) / 1000;
   if (Math.abs(diff) > 0.001) anomalies.push('DESEQUILIBRE: D=' + totalD.toFixed(3) + ' C=' + totalC.toFixed(3) + ' diff=' + diff.toFixed(3));
 
-  const EXPORT_SENS = { '707200': 'C', '707219': 'C', '436711': 'C', '437500': 'C', '709500': 'C' };
+  const EXPORT_SENS = { '707200': 'C', '707219': 'C', '436711': 'C', '437500': 'C', '709500': 'D' };
   for (const e of rows) {
     if (e.montant === 0) continue;
     const expected = EXPORT_SENS[e.compte];
@@ -466,8 +466,8 @@ app.post('/api/dossiers/:did/generate-vtjc', (req, res) => {
       const modes = (req.body.modes && req.body.modes[date]) || dbRapport || RAPPORT_MODES_JUIN[date] || { especes: totalTTC, tpe: 0, cheques: 0, bonsAchat: 0, avoir: 0 };
 
       const avoir709 = (modes.bonsAchat || 0) + (modes.avoir || 0);
-      const debitSum = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0);
-      const creditSum = tva19 + timbres + totalHT0 + totalHT19 + avoir709;
+      const debitSum = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0) + avoir709;
+      const creditSum = tva19 + timbres + totalHT0 + totalHT19;
       const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
 
       const lines = [];
@@ -478,7 +478,7 @@ app.post('/api/dossiers/:did/generate-vtjc', (req, res) => {
       lines.push({ compte: '437500', montant: timbres, sens: 'C' });
       if (totalHT0 > 0) lines.push({ compte: '707200', montant: totalHT0, sens: 'C' });
       if (totalHT19 > 0) lines.push({ compte: '707219', montant: totalHT19, sens: 'C' });
-      if (avoir709 > 0) lines.push({ compte: '709500', montant: Math.round(avoir709 * 1000) / 1000, sens: 'C' });
+      if (avoir709 > 0) lines.push({ compte: '709500', montant: Math.round(avoir709 * 1000) / 1000, sens: 'D' });
       if (ecart !== 0) lines.push({ compte: '634500', montant: Math.abs(ecart), sens: ecart > 0 ? 'C' : 'D' });
 
       for (const { compte, montant, sens } of lines) {
@@ -615,8 +615,8 @@ app.post('/api/seed-juin-2026', (req, res) => {
       const rapport = RAPPORT_MODES_JUIN[date] || { especes: totalTTC, cheques: 0, tpe: 0, bonsAchat: 0, avoir: 0 };
 
       const avoir709 = (rapport.bonsAchat || 0) + (rapport.avoir || 0);
-      const debitSum = (rapport.especes || 0) + (rapport.tpe || 0) + (rapport.cheques || 0);
-      const creditSum = tva19 + timbres + totalHT0 + totalHT19 + avoir709;
+      const debitSum = (rapport.especes || 0) + (rapport.tpe || 0) + (rapport.cheques || 0) + avoir709;
+      const creditSum = tva19 + timbres + totalHT0 + totalHT19;
       const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
 
       if ((rapport.especes || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', 'D', rapport.especes, null);
@@ -626,7 +626,7 @@ app.post('/api/seed-juin-2026', (req, res) => {
       if (totalHT19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707219', 'C', totalHT19, null);
       if (tva19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '436711', 'C', tva19, null);
       insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '437500', 'C', timbres, null);
-      if (avoir709 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '709500', 'C', avoir709, null);
+      if (avoir709 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '709500', 'D', avoir709, null);
       if (ecart !== 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '634500', ecart > 0 ? 'C' : 'D', Math.abs(ecart), null);
     }
 
@@ -658,4 +658,62 @@ app.use((req, res, next) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`ComptaFlow tourne sur http://localhost:${PORT}`);
+  try {
+    const d = db.prepare('SELECT id, societe_id FROM dossiers WHERE nom = ?').get('ANIMAL');
+    if (d) {
+      const existing = db.prepare('SELECT COUNT(*) as c FROM factures WHERE dossier_id = ?').get(d.id);
+      if (existing.c === 0) {
+        console.log('Auto-seeding June 2026 data...');
+        const insertF = db.prepare('INSERT INTO factures (id, dossier_id, societe_id, date_facture, numero_facture, client, total_ht_0, total_ht_19, tva_19, timbre, total_ttc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        const insertE = db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte, sens, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        const insertR = db.prepare('INSERT OR REPLACE INTO rapport_modes (id, dossier_id, date_jour, especes, cheques, tpe, bonsAchat, avoir) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        const txn = db.transaction(() => {
+          for (const [num, date, client, ht0, ht19, tva, timbre, ttc] of JUIN_2026_DATA) {
+            insertF.run(genId(), d.id, d.societe_id, date, num, client, ht0, ht19, tva, timbre, ttc);
+          }
+          for (const [date, rapport] of Object.entries(RAPPORT_MODES_JUIN)) {
+            if (rapport && rapport.especes > 0) {
+              insertR.run(genId(), d.id, date, rapport.especes, rapport.cheques, rapport.tpe, rapport.bonsAchat, rapport.avoir);
+            }
+          }
+          const byDay = {};
+          for (const [num, date, client, ht0, ht19, tva, timbre, ttc] of JUIN_2026_DATA) {
+            if (!byDay[date]) byDay[date] = [];
+            byDay[date].push({ num, client, ht0, ht19, tva, ttc });
+          }
+          for (const [date, dayF] of Object.entries(byDay)) {
+            const nums = dayF.map(f => f.num.split('/')[1]).sort((a, b) => a - b);
+            const numPiece = nums.length === 1 ? 'FAC N' + nums[0] + '-26' : 'FAC N' + nums.join('-') + '-26';
+            const clients = [...new Set(dayF.map(f => f.client).filter(Boolean))];
+            const libelle = clients.length > 0 ? 'CLTS PASSAGERS/' + clients.join('/') : 'CLTS PASSAGERS';
+            const totalHT0 = Math.round(dayF.reduce((s, f) => s + f.ht0, 0) * 1000) / 1000;
+            const totalHT19 = Math.round(dayF.reduce((s, f) => s + f.ht19, 0) * 1000) / 1000;
+            const tva19 = Math.round(dayF.reduce((s, f) => s + f.tva, 0) * 1000) / 1000;
+            const timbres = dayF.reduce((s, f) => s + (f.timbre || 1), 0);
+            const rapport = RAPPORT_MODES_JUIN[date] || { especes: totalTTC, cheques: 0, tpe: 0, bonsAchat: 0, avoir: 0 };
+            const avoir709 = (rapport.bonsAchat || 0) + (rapport.avoir || 0);
+            const debitSum = (rapport.especes || 0) + (rapport.tpe || 0) + (rapport.cheques || 0) + avoir709;
+            const creditSum = tva19 + timbres + totalHT0 + totalHT19;
+            const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
+            if ((rapport.especes || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', 'D', rapport.especes, null);
+            if ((rapport.tpe || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411005', 'D', rapport.tpe, null);
+            if ((rapport.cheques || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411003', 'D', rapport.cheques, null);
+            if (totalHT0 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707200', 'C', totalHT0, null);
+            if (totalHT19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707219', 'C', totalHT19, null);
+            if (tva19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '436711', 'C', tva19, null);
+            insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '437500', 'C', timbres, null);
+            if (avoir709 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '709500', 'D', avoir709, null);
+            if (ecart !== 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '634500', ecart > 0 ? 'C' : 'D', Math.abs(ecart), null);
+          }
+          db.prepare('UPDATE dossiers SET nb_ecritures = (SELECT COUNT(*) FROM ecritures WHERE dossier_id = ?) WHERE id = ?').run(d.id, d.id);
+        });
+        txn();
+        console.log('Auto-seed complete: 34 factures + ecritures + rapport_modes');
+      } else {
+        console.log(`Skipping seed: ${existing.c} factures already exist`);
+      }
+    }
+  } catch (e) {
+    console.error('Auto-seed failed:', e.message);
+  }
 });
