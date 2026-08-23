@@ -490,14 +490,18 @@ app.get('/api/dossiers/:did/excluded', (req, res) => {
     const ht19 = dayFactures.reduce((s, f) => s + (f.total_ht_19 || f.ht19 || 0), 0);
     const tva = dayFactures.reduce((s, f) => s + (f.tva_19 || f.tva || 0), 0);
     const ttc = dayFactures.reduce((s, f) => s + (f.total_ttc || f.ttc || 0), 0);
+    const timbres = dayFactures.reduce((s, f) => s + (f.timbre || 1), 0);
     const totalModes = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0) + (modes.bonsAchat || 0) + (modes.avoir || 0) + (modes.credit || 0);
     const factureLines = dayFactures.map(f => ({
       num: f.numero_facture, client: f.client, ht0: f.total_ht_0 || f.ht0 || 0,
       ht19: f.total_ht_19 || f.ht19 || 0, tva: f.tva_19 || f.tva || 0, ttc: f.total_ttc || f.ttc || 0
     }));
     const proposedLines = r.excluded ? [] : r.lines.map(l => ({ compte: l.compte, sens: l.sens, montant: l.montant, libelle: l.libelle }));
+    const debitSum = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0) + (modes.bonsAchat || 0) + (modes.avoir || 0);
+    const creditSum = tva + timbres + ht0 + ht19;
+    const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
     results.push({
-      date, ecart: r.ecart, excluded: EXCLUDED_DAYS.has(date),
+      date, ecart, excluded: EXCLUDED_DAYS.has(date),
       totalFactures: ttc, totalModes: totalModes, nbFactures: dayFactures.length,
       modes: { especes: modes.especes || 0, cheques: modes.cheques || 0, tpe: modes.tpe || 0, bonsAchat: modes.bonsAchat || 0, avoir: modes.avoir || 0, credit: modes.credit || 0 },
       factures: factureLines, proposedEcritures: proposedLines

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Upload, Plus, Trash2, Download, ArrowLeft, FileText, Zap, Loader2, AlertTriangle } from 'lucide-react';
+import { Upload, Plus, Trash2, Download, ArrowLeft, FileText, Zap, Loader2, AlertTriangle, FileSpreadsheet } from 'lucide-react';
 import { api } from '../lib/api';
 
 export default function DossierPage() {
@@ -116,6 +116,19 @@ export default function DossierPage() {
     URL.revokeObjectURL(url);
   };
 
+  const exportXLSX = async () => {
+    if (!id) return;
+    const { default: XLSX } = await import('xlsx');
+    const csv = await api.exportCSV(id);
+    const lines = csv.trim().split('\n');
+    const headers = lines[0].split(';');
+    const rows = lines.slice(1).map(l => l.split(';'));
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Ecritures');
+    XLSX.writeFile(wb, 'ecritures_' + (dossier?.nom || id) + '.xlsx');
+  };
+
   if (loading) return <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
 
   return (
@@ -127,9 +140,14 @@ export default function DossierPage() {
             <h1 className="text-xl font-bold">{dossier?.nom}</h1>
             <p className="text-sm text-gray-500">{factures.length} facture(s) | {ecritures.length} ecriture(s) | {pieces.length} piece(s)</p>
           </div>
-          <button onClick={exportCSV} disabled={!ecritures.length} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
-            <Download className="w-4 h-4" /> Exporter CSV
-          </button>
+          <div className="flex gap-2">
+            <button onClick={exportCSV} disabled={!ecritures.length} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
+              <Download className="w-4 h-4" /> CSV
+            </button>
+            <button onClick={exportXLSX} disabled={!ecritures.length} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1.5">
+              <FileSpreadsheet className="w-4 h-4" /> XLSX
+            </button>
+          </div>
         </div>
       </div>
 
