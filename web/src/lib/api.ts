@@ -28,6 +28,7 @@ export const api = {
   getEcritures: (did: string) => req<any[]>(`/dossiers/${did}/ecritures`),
   addEcriture: (did: string, d: any) => req<any>(`/dossiers/${did}/ecritures`, { method: 'POST', body: JSON.stringify(d) }),
   deleteEcriture: (eid: string) => req<any>(`/ecritures/${eid}`, { method: 'DELETE' }),
+  deleteAllEcritures: (did: string) => req<any>(`/dossiers/${did}/ecritures`, { method: 'DELETE' }),
   exportCSV: (did: string) => req<string>(`/dossiers/${did}/export`),
   getFactures: (did: string) => req<any[]>(`/dossiers/${did}/factures`),
   addFacture: (did: string, d: any) => req<any>(`/dossiers/${did}/factures`, { method: 'POST', body: JSON.stringify(d) }),

@@ -388,6 +388,12 @@ app.delete('/api/ecritures/:eid', (req, res) => {
   res.json({ ok: true });
 });
 
+app.delete('/api/dossiers/:did/ecritures', (req, res) => {
+  db.prepare("DELETE FROM ecritures WHERE dossier_id = ? AND journal_code = 'VT J.C'").run(req.params.did);
+  db.prepare('UPDATE dossiers SET nb_ecritures = (SELECT COUNT(*) FROM ecritures WHERE dossier_id = ?) WHERE id = ?').run(req.params.did, req.params.did);
+  res.json({ ok: true });
+});
+
 // --- EXPORT CSV ---
 app.get('/api/dossiers/:did/export', (req, res) => {
   const rows = db.prepare('SELECT * FROM ecritures WHERE dossier_id = ? ORDER BY date_operation, journal_code, compte').all(req.params.did);

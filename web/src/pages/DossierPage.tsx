@@ -71,8 +71,9 @@ export default function DossierPage() {
     reload();
   };
   const delAllFactures = async () => {
-    if (!id || !confirm('Supprimer TOUTES les factures + écritures VT J.C ?')) return;
+    if (!id || !confirm('Supprimer TOUT : factures + écritures VT J.C + rapport ?')) return;
     await api.deleteAllFactures(id);
+    await api.deleteRapport(id);
     reload();
   };
 
@@ -204,7 +205,15 @@ export default function DossierPage() {
 
       {/* ECRITURES */}
       {tab === 'ecritures' && (
-        <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="space-y-3">
+          {ecritures.length > 0 && (
+            <div className="flex gap-2 justify-end">
+              <button onClick={async () => { if (!id || !confirm('Supprimer toutes les ecritures VT J.C?')) return; await api.deleteAllEcritures(id); reload(); }} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1">
+                <Trash2 className="w-4 h-4" /> Supprimer ecritures VT J.C
+              </button>
+            </div>
+          )}
+          <div className="bg-white rounded-xl border overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
@@ -228,6 +237,7 @@ export default function DossierPage() {
               </tbody>
             </table>
           </div>
+        </div>
         </div>
       )}
 
