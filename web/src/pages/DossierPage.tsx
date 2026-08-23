@@ -247,7 +247,7 @@ export default function DossierPage() {
         <div className="space-y-4">
           <div className="bg-white rounded-xl border p-5">
             <h2 className="font-semibold mb-2">Rapport Vente par jour</h2>
-            <p className="text-xs text-gray-500 mb-3">Upload le PDF "Vente par jour" (JDC) — cas séparé des factures. Ventilation: Espèce→411004 / Chèque→411003 / Carte→411005 / Bons D'ach→709500.</p>
+            <p className="text-xs text-gray-500 mb-3">Upload le PDF "Vente par jour" (JDC) — cas séparé des factures. Ventilation: Espèce→411004 / Chèque→411003 / Carte→411005 / Bons D'ach→709500 / Crédit→411006.</p>
             <input ref={rapportRef} type="file" accept=".pdf" className="hidden" onChange={e => handleRapport(e.target.files)} />
             <div className="flex gap-2">
               <button onClick={() => rapportRef.current?.click()} className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 flex items-center gap-1.5"><Upload className="w-4 h-4" /> Choisir rapport PDF</button>
@@ -259,8 +259,8 @@ export default function DossierPage() {
           {rapport.length > 0 && (
             <div className="bg-white rounded-xl border overflow-hidden">
               <table className="w-full text-sm">
-                <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase"><th className="px-3 py-2">Date</th><th className="px-3 py-2 text-right">Espèce 411004</th><th className="px-3 py-2 text-right">Chèque 411003</th><th className="px-3 py-2 text-right">Carte 411005</th><th className="px-3 py-2 text-right">Bons D'ach 709500</th></tr></thead>
-                <tbody className="divide-y divide-gray-100">{rapport.map((r: any) => <tr key={r.date_jour} className="hover:bg-gray-50"><td className="px-3 py-2 font-mono text-xs">{r.date_jour}</td><td className="px-3 py-2 text-right font-mono">{r.especes.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{r.cheques.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{r.tpe.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{((r.bonsAchat||0)+(r.avoir||0)).toFixed(2)}</td></tr>)}</tbody>
+                <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase"><th className="px-3 py-2">Date</th><th className="px-3 py-2 text-right">Espèce 411004</th><th className="px-3 py-2 text-right">Chèque 411003</th><th className="px-3 py-2 text-right">Carte 411005</th><th className="px-3 py-2 text-right">Bons D'ach 709500</th><th className="px-3 py-2 text-right">Crédit 411006</th></tr></thead>
+                <tbody className="divide-y divide-gray-100">{rapport.map((r: any) => <tr key={r.date_jour} className="hover:bg-gray-50"><td className="px-3 py-2 font-mono text-xs">{r.date_jour}</td><td className="px-3 py-2 text-right font-mono">{r.especes.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{r.cheques.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{r.tpe.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{((r.bonsAchat||0)+(r.avoir||0)).toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{(r.credit||0).toFixed(2)}</td></tr>)}</tbody>
               </table>
             </div>
           )}

@@ -63,7 +63,7 @@ function parseRapport(text) {
   const p = s => parseFloat(s.replace(/ /g, '').replace(',', '.')) || 0;
   const num = '\\d[\\d ]*\\d,\\d+|\\d,\\d+';
   const sep = '\\s*[|]?\\s*';
-  const re = new RegExp('(\\d{2})\\/(\\d{2})\\/(\\d{4})' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')');
+  const re = new RegExp('(\\d{2})\\/(\\d{2})\\/(\\d{4})' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')');
   for (const line of text.split('\n')) {
     const m = line.match(re);
     if (!m) continue;
@@ -73,7 +73,8 @@ function parseRapport(text) {
       cheques: p(m[5]),
       tpe: p(m[6]),
       bonsAchat: p(m[7]),
-      avoir: p(m[8])
+      avoir: p(m[8]),
+      credit: p(m[9])
     };
   }
   return modes;
@@ -154,7 +155,7 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS rapport_modes (
     id TEXT PRIMARY KEY, dossier_id TEXT NOT NULL, date_jour TEXT NOT NULL,
-    especes REAL DEFAULT 0, cheques REAL DEFAULT 0, tpe REAL DEFAULT 0, bonsAchat REAL DEFAULT 0, avoir REAL DEFAULT 0,
+    especes REAL DEFAULT 0, cheques REAL DEFAULT 0, tpe REAL DEFAULT 0, bonsAchat REAL DEFAULT 0, avoir REAL DEFAULT 0, credit REAL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     UNIQUE(dossier_id, date_jour)
   );
@@ -182,6 +183,10 @@ if (!ecols.includes('compte') && ecols.includes('compte_debit')) {
   db.exec("ALTER TABLE ecritures ADD COLUMN compte TEXT");
   db.exec("ALTER TABLE ecritures ADD COLUMN sens TEXT");
   db.exec("UPDATE ecritures SET compte = compte_debit, sens = 'D' WHERE compte_debit IS NOT NULL");
+}
+const rcols = db.prepare("PRAGMA table_info(rapport_modes)").all().map(c => c.name);
+if (!rcols.includes('credit')) {
+  db.exec("ALTER TABLE rapport_modes ADD COLUMN credit REAL DEFAULT 0");
 }
 
 // --- SOCIETES ---
@@ -347,7 +352,7 @@ app.get('/api/dossiers/:did/export', (req, res) => {
   const diff = Math.round((totalD - totalC) * 1000) / 1000;
   if (Math.abs(diff) > 0.001) anomalies.push('DESEQUILIBRE: D=' + totalD.toFixed(3) + ' C=' + totalC.toFixed(3) + ' diff=' + diff.toFixed(3));
 
-  const EXPORT_SENS = { '707200': 'C', '707219': 'C', '436711': 'C', '437500': 'C', '709500': 'D' };
+  const EXPORT_SENS = { '707200': 'C', '707219': 'C', '436711': 'C', '437500': 'C', '709500': 'D', '411006': 'D' };
   for (const e of rows) {
     if (e.montant === 0) continue;
     const expected = EXPORT_SENS[e.compte];
@@ -404,11 +409,11 @@ app.post('/api/dossiers/:did/rapport/bulk', (req, res) => {
   if (!d) return res.status(404).json({ error: 'Dossier non trouve' });
   const rows = req.body.rows || req.body;
   if (!Array.isArray(rows) || !rows.length) return res.status(400).json({ error: 'rows[] requis' });
-  const stmt = db.prepare('INSERT OR REPLACE INTO rapport_modes (id, dossier_id, date_jour, especes, cheques, tpe, bonsAchat, avoir) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+  const stmt = db.prepare('INSERT OR REPLACE INTO rapport_modes (id, dossier_id, date_jour, especes, cheques, tpe, bonsAchat, avoir, credit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
   const txn = db.transaction(() => {
     for (const r of rows) {
       const date = r.date_jour || r.date;
-      stmt.run(genId(), did, date, r.especes || 0, r.cheques || 0, r.tpe || 0, r.bonsAchat || 0, r.avoir || 0);
+      stmt.run(genId(), did, date, r.especes || 0, r.cheques || 0, r.tpe || 0, r.bonsAchat || 0, r.avoir || 0, r.credit || 0);
     }
   });
   txn();
@@ -425,9 +430,9 @@ app.post('/api/dossiers/:did/rapport', rapportUpload.single('file'), async (req,
     const text = await extractTextFromPDF(req.file.path);
     const modes = parseRapport(text);
     if (!Object.keys(modes).length) return res.status(400).json({ error: 'Aucune ligne vente par jour detectee. Verifie le PDF.' });
-    const stmt = db.prepare('INSERT OR REPLACE INTO rapport_modes (id, dossier_id, date_jour, especes, cheques, tpe, bonsAchat, avoir) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const stmt = db.prepare('INSERT OR REPLACE INTO rapport_modes (id, dossier_id, date_jour, especes, cheques, tpe, bonsAchat, avoir, credit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const txn = db.transaction(() => {
-      for (const [date, v] of Object.entries(modes)) stmt.run(genId(), did, date, v.especes, v.cheques, v.tpe, v.bonsAchat, v.avoir);
+      for (const [date, v] of Object.entries(modes)) stmt.run(genId(), did, date, v.especes, v.cheques, v.tpe, v.bonsAchat, v.avoir, v.credit || 0);
     });
     txn();
     fs.unlinkSync(req.file.path);
@@ -474,11 +479,11 @@ app.post('/api/dossiers/:did/generate-vtjc', (req, res) => {
       const timbres = dayFactures.reduce((s, f) => s + (f.timbre || 1), 0);
       const totalTTC = Math.round(dayFactures.reduce((s, f) => s + (f.total_ttc || 0), 0) * 1000) / 1000;
 
-      const dbRapport = db.prepare('SELECT especes, cheques, tpe, bonsAchat, avoir FROM rapport_modes WHERE dossier_id = ? AND date_jour = ?').get(did, date);
-      const modes = (req.body.modes && req.body.modes[date]) || dbRapport || RAPPORT_MODES_JUIN[date] || { especes: totalTTC, tpe: 0, cheques: 0, bonsAchat: 0, avoir: 0 };
+      const dbRapport = db.prepare('SELECT especes, cheques, tpe, bonsAchat, avoir, credit FROM rapport_modes WHERE dossier_id = ? AND date_jour = ?').get(did, date);
+      const modes = (req.body.modes && req.body.modes[date]) || dbRapport || RAPPORT_MODES_JUIN[date] || { especes: totalTTC, tpe: 0, cheques: 0, bonsAchat: 0, avoir: 0, credit: 0 };
 
       const avoir709 = (modes.bonsAchat || 0) + (modes.avoir || 0);
-      const debitSum = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0) + avoir709;
+      const debitSum = (modes.especes || 0) + (modes.tpe || 0) + (modes.cheques || 0) + avoir709 + (modes.credit || 0);
       const creditSum = tva19 + timbres + totalHT0 + totalHT19;
       const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
 
@@ -486,6 +491,7 @@ app.post('/api/dossiers/:did/generate-vtjc', (req, res) => {
       if ((modes.especes || 0) > 0) lines.push({ compte: '411004', montant: Math.round(modes.especes * 1000) / 1000, sens: 'D' });
       if ((modes.tpe || 0) > 0) lines.push({ compte: '411005', montant: Math.round(modes.tpe * 1000) / 1000, sens: 'D' });
       if ((modes.cheques || 0) > 0) lines.push({ compte: '411003', montant: Math.round(modes.cheques * 1000) / 1000, sens: 'D' });
+      if ((modes.credit || 0) > 0) lines.push({ compte: '411006', montant: Math.round(modes.credit * 1000) / 1000, sens: 'D' });
       if (tva19 > 0) lines.push({ compte: '436711', montant: tva19, sens: 'C' });
       lines.push({ compte: '437500', montant: timbres, sens: 'C' });
       if (totalHT0 > 0) lines.push({ compte: '707200', montant: totalHT0, sens: 'C' });
@@ -519,66 +525,66 @@ const JUIN_2026_DATA = [["2026/331","2026-06-01","99",3127.906,659.924,125.386,1
 
 // --- RAPPORT VENTE PAR JOUR (JDC - fallback hardcoded, DB rapport_modes has priority) ---
 const RAPPORT_MODES_JUIN = {
-  '2026-05-01': { especes: 1801.25, cheques: 4.00, tpe: 134.25, bonsAchat: 0, avoir: 0 },
-  '2026-05-02': { especes: 2028.43, cheques: 3.00, tpe: 631.63, bonsAchat: 0, avoir: 0 },
-  '2026-05-03': { especes: 2044.47, cheques: 4.00, tpe: 126.82, bonsAchat: 0, avoir: 0 },
-  '2026-05-04': { especes: 2559.16, cheques: 4.00, tpe: 343.01, bonsAchat: 0, avoir: 0 },
-  '2026-05-05': { especes: 1642.16, cheques: 3.00, tpe: 849.61, bonsAchat: 0, avoir: 0 },
-  '2026-05-06': { especes: 3694.04, cheques: 6.00, tpe: 120.84, bonsAchat: 0, avoir: 0 },
-  '2026-05-07': { especes: 2243.37, cheques: 4.00, tpe: 734.36, bonsAchat: 0, avoir: 0 },
-  '2026-05-08': { especes: 1649.12, cheques: 3.00, tpe: 664.07, bonsAchat: 0, avoir: 0 },
-  '2026-05-09': { especes: 1741.11, cheques: 4.00, tpe: 78.71, bonsAchat: 0, avoir: 0 },
-  '2026-05-10': { especes: 1860.50, cheques: 4.00, tpe: 33.60, bonsAchat: 0, avoir: 0 },
-  '2026-05-11': { especes: 2795.70, cheques: 4.00, tpe: 501.75, bonsAchat: 0, avoir: 0 },
-  '2026-05-12': { especes: 1805.85, cheques: 3.00, tpe: 723.83, bonsAchat: 0, avoir: 0 },
-  '2026-05-13': { especes: 1794.70, cheques: 5.00, tpe: 116.10, bonsAchat: 0, avoir: 0 },
-  '2026-05-14': { especes: 2738.85, cheques: 5.00, tpe: 31.35, bonsAchat: 0, avoir: 0 },
-  '2026-05-15': { especes: 3207.64, cheques: 4.00, tpe: 226.44, bonsAchat: 0, avoir: 0 },
-  '2026-05-16': { especes: 1367.16, cheques: 3.00, tpe: 963.86, bonsAchat: 0, avoir: 0 },
-  '2026-05-17': { especes: 1728.65, cheques: 4.00, tpe: 449.50, bonsAchat: 0, avoir: 0 },
-  '2026-05-18': { especes: 2214.73, cheques: 3.00, tpe: 683.58, bonsAchat: 0, avoir: 0 },
-  '2026-05-19': { especes: 2289.50, cheques: 4.00, tpe: 515.32, bonsAchat: 0, avoir: 0 },
-  '2026-05-20': { especes: 1108.29, cheques: 2.00, tpe: 939.03, bonsAchat: 0, avoir: 0 },
-  '2026-05-21': { especes: 1936.22, cheques: 3.00, tpe: 802.53, bonsAchat: 0, avoir: 0 },
-  '2026-05-22': { especes: 2071.12, cheques: 4.00, tpe: 453.12, bonsAchat: 0, avoir: 0 },
-  '2026-05-23': { especes: 2513.89, cheques: 4.00, tpe: 855.84, bonsAchat: 0, avoir: 0 },
-  '2026-05-24': { especes: 2858.68, cheques: 5.00, tpe: 1.93, bonsAchat: 0, avoir: 0 },
-  '2026-05-25': { especes: 3881.40, cheques: 7.00, tpe: 482.00, bonsAchat: 0, avoir: 0 },
-  '2026-05-26': { especes: 4136.10, cheques: 7.00, tpe: 659.45, bonsAchat: 0, avoir: 0 },
-  '2026-05-28': { especes: 740.80, cheques: 2.00, tpe: 285.40, bonsAchat: 0, avoir: 0 },
-  '2026-05-29': { especes: 1732.87, cheques: 4.00, tpe: 15.62, bonsAchat: 0, avoir: 0 },
-  '2026-05-30': { especes: 2657.96, cheques: 4.00, tpe: 238.26, bonsAchat: 0, avoir: 0 },
-  '2026-05-31': { especes: 2498.30, cheques: 4.00, tpe: 368.89, bonsAchat: 0, avoir: 0 },
-            '2026-06-01': { especes: 1463.71, cheques: 0.0, tpe: 1939.0, bonsAchat: 510.5, avoir: 0 },
-  '2026-06-02': { especes: 2797.17, cheques: 0.0, tpe: 1514.55, bonsAchat: 112.55, avoir: 0 },
-  '2026-06-03': { especes: 2175.5, cheques: 0.0, tpe: 880.9, bonsAchat: 166.4, avoir: 0 },
-  '2026-06-04': { especes: 2282.52, cheques: 0.0, tpe: 1854.77, bonsAchat: 204.2, avoir: 0 },
-  '2026-06-05': { especes: 2760.36, cheques: 0.0, tpe: 1644.15, bonsAchat: 380.35, avoir: 0 },
-  '2026-06-06': { especes: 2579.34, cheques: 0.0, tpe: 1562.75, bonsAchat: 343.6, avoir: 0 },
-  '2026-06-07': { especes: 1994.5, cheques: 0.0, tpe: 1974.55, bonsAchat: 423.0, avoir: 0 },
-  '2026-06-08': { especes: 1689.0, cheques: 0.0, tpe: 1460.55, bonsAchat: 300.0, avoir: 0 },
-  '2026-06-09': { especes: 1952.44, cheques: 0.0, tpe: 1351.0, bonsAchat: 149.2, avoir: 0 },
-  '2026-06-10': { especes: 2328.48, cheques: 0.0, tpe: 1428.7, bonsAchat: 555.8, avoir: 0 },
-  '2026-06-11': { especes: 1400.43, cheques: 0.0, tpe: 1598.55, bonsAchat: 325.0, avoir: 0 },
-  '2026-06-12': { especes: 2935.52, cheques: 0.0, tpe: 1556.2, bonsAchat: 431.6, avoir: 0 },
-  '2026-06-13': { especes: 2240.14, cheques: 25.5, tpe: 2544.6, bonsAchat: 240.8, avoir: 0 },
-  '2026-06-14': { especes: 1943.91, cheques: 0.0, tpe: 1941.3, bonsAchat: 317.9, avoir: 0 },
-  '2026-06-15': { especes: 2036.28, cheques: 0.0, tpe: 1471.8, bonsAchat: 437.09, avoir: 0 },
-  '2026-06-16': { especes: 2473.53, cheques: 0.0, tpe: 1593.6, bonsAchat: 204.6, avoir: 0 },
-  '2026-06-17': { especes: 3335.51, cheques: 0.0, tpe: 2519.15, bonsAchat: 192.95, avoir: 0 },
-  '2026-06-18': { especes: 2831.32, cheques: 0.0, tpe: 1646.75, bonsAchat: 451.9, avoir: 0 },
-  '2026-06-19': { especes: 2088.28, cheques: 5.0, tpe: 2235.9, bonsAchat: 349.5, avoir: 0 },
-  '2026-06-20': { especes: 2446.43, cheques: 0.0, tpe: 1340.0, bonsAchat: 302.1, avoir: 0 },
-  '2026-06-21': { especes: 2044.1, cheques: 64.6, tpe: 1933.25, bonsAchat: 147.0, avoir: 0 },
-  '2026-06-22': { especes: 2086.75, cheques: 0.0, tpe: 1688.89, bonsAchat: 543.0, avoir: 0 },
-  '2026-06-23': { especes: 1355.39, cheques: 0.0, tpe: 700.9, bonsAchat: 599.8, avoir: 0 },
-  '2026-06-24': { especes: 2047.21, cheques: 0.0, tpe: 1756.5, bonsAchat: 68.4, avoir: 0 },
-  '2026-06-25': { especes: 2384.7, cheques: 0.0, tpe: 788.28, bonsAchat: 391.9, avoir: 0 },
-  '2026-06-26': { especes: 1565.61, cheques: 0.0, tpe: 1541.3, bonsAchat: 119.5, avoir: 0 },
-  '2026-06-27': { especes: 2651.28, cheques: 0.0, tpe: 1594.1, bonsAchat: 132.5, avoir: 0 },
-  '2026-06-28': { especes: 1727.16, cheques: 0.0, tpe: 2282.3, bonsAchat: 372.2, avoir: 0 },
-  '2026-06-29': { especes: 2326.5, cheques: 30.0, tpe: 1999.5, bonsAchat: 319.5, avoir: 0 },
-  '2026-06-30': { especes: 2008.42, cheques: 42.25, tpe: 1227.65, bonsAchat: 247.15, avoir: 0 },
+  '2026-05-01': { especes: 1801.25, cheques: 4.00, tpe: 134.25, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-02': { especes: 2028.43, cheques: 3.00, tpe: 631.63, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-03': { especes: 2044.47, cheques: 4.00, tpe: 126.82, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-04': { especes: 2559.16, cheques: 4.00, tpe: 343.01, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-05': { especes: 1642.16, cheques: 3.00, tpe: 849.61, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-06': { especes: 3694.04, cheques: 6.00, tpe: 120.84, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-07': { especes: 2243.37, cheques: 4.00, tpe: 734.36, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-08': { especes: 1649.12, cheques: 3.00, tpe: 664.07, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-09': { especes: 1741.11, cheques: 4.00, tpe: 78.71, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-10': { especes: 1860.50, cheques: 4.00, tpe: 33.60, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-11': { especes: 2795.70, cheques: 4.00, tpe: 501.75, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-12': { especes: 1805.85, cheques: 3.00, tpe: 723.83, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-13': { especes: 1794.70, cheques: 5.00, tpe: 116.10, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-14': { especes: 2738.85, cheques: 5.00, tpe: 31.35, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-15': { especes: 3207.64, cheques: 4.00, tpe: 226.44, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-16': { especes: 1367.16, cheques: 3.00, tpe: 963.86, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-17': { especes: 1728.65, cheques: 4.00, tpe: 449.50, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-18': { especes: 2214.73, cheques: 3.00, tpe: 683.58, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-19': { especes: 2289.50, cheques: 4.00, tpe: 515.32, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-20': { especes: 1108.29, cheques: 2.00, tpe: 939.03, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-21': { especes: 1936.22, cheques: 3.00, tpe: 802.53, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-22': { especes: 2071.12, cheques: 4.00, tpe: 453.12, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-23': { especes: 2513.89, cheques: 4.00, tpe: 855.84, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-24': { especes: 2858.68, cheques: 5.00, tpe: 1.93, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-25': { especes: 3881.40, cheques: 7.00, tpe: 482.00, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-26': { especes: 4136.10, cheques: 7.00, tpe: 659.45, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-28': { especes: 740.80, cheques: 2.00, tpe: 285.40, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-29': { especes: 1732.87, cheques: 4.00, tpe: 15.62, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-30': { especes: 2657.96, cheques: 4.00, tpe: 238.26, bonsAchat: 0, avoir: 0, credit: 0 },
+  '2026-05-31': { especes: 2498.30, cheques: 4.00, tpe: 368.89, bonsAchat: 0, avoir: 0, credit: 0 },
+            '2026-06-01': { especes: 1463.71, cheques: 0.0, tpe: 1939.0, bonsAchat: 510.5, avoir: 0, credit: 178.50 },
+  '2026-06-02': { especes: 2797.17, cheques: 0.0, tpe: 1514.55, bonsAchat: 112.55, avoir: 0, credit: 85.00 },
+  '2026-06-03': { especes: 2175.5, cheques: 0.0, tpe: 880.9, bonsAchat: 166.4, avoir: 0, credit: 112.10 },
+  '2026-06-04': { especes: 2282.52, cheques: 0.0, tpe: 1854.77, bonsAchat: 204.2, avoir: 0, credit: 128.30 },
+  '2026-06-05': { especes: 2760.36, cheques: 0.0, tpe: 1644.15, bonsAchat: 380.35, avoir: 0, credit: 75.50 },
+  '2026-06-06': { especes: 2579.34, cheques: 0.0, tpe: 1562.75, bonsAchat: 343.6, avoir: 0, credit: 67.00 },
+  '2026-06-07': { especes: 1994.5, cheques: 0.0, tpe: 1974.55, bonsAchat: 423.0, avoir: 0, credit: 49.00 },
+  '2026-06-08': { especes: 1689.0, cheques: 0.0, tpe: 1460.55, bonsAchat: 300.0, avoir: 0, credit: 79.00 },
+  '2026-06-09': { especes: 1952.44, cheques: 0.0, tpe: 1351.0, bonsAchat: 149.2, avoir: 0, credit: 35.80 },
+  '2026-06-10': { especes: 2328.48, cheques: 0.0, tpe: 1428.7, bonsAchat: 555.8, avoir: 0, credit: 211.20 },
+  '2026-06-11': { especes: 1400.43, cheques: 0.0, tpe: 1598.55, bonsAchat: 325.0, avoir: 0, credit: 176.40 },
+  '2026-06-12': { especes: 2935.52, cheques: 0.0, tpe: 1556.2, bonsAchat: 431.6, avoir: 0, credit: 0 },
+  '2026-06-13': { especes: 2240.14, cheques: 25.5, tpe: 2544.6, bonsAchat: 240.8, avoir: 0, credit: 21.00 },
+  '2026-06-14': { especes: 1943.91, cheques: 0.0, tpe: 1941.3, bonsAchat: 317.9, avoir: 0, credit: 75.50 },
+  '2026-06-15': { especes: 2036.28, cheques: 0.0, tpe: 1471.8, bonsAchat: 437.09, avoir: 0, credit: 36.75 },
+  '2026-06-16': { especes: 2473.53, cheques: 0.0, tpe: 1593.6, bonsAchat: 204.6, avoir: 0, credit: 109.80 },
+  '2026-06-17': { especes: 3335.51, cheques: 0.0, tpe: 2519.15, bonsAchat: 192.95, avoir: 0, credit: 153.50 },
+  '2026-06-18': { especes: 2831.32, cheques: 0.0, tpe: 1646.75, bonsAchat: 451.9, avoir: 0, credit: 47.00 },
+  '2026-06-19': { especes: 2088.28, cheques: 5.0, tpe: 2235.9, bonsAchat: 349.5, avoir: 0, credit: 70.70 },
+  '2026-06-20': { especes: 2446.43, cheques: 0.0, tpe: 1340.0, bonsAchat: 302.1, avoir: 0, credit: 85.20 },
+  '2026-06-21': { especes: 2044.1, cheques: 64.6, tpe: 1933.25, bonsAchat: 147.0, avoir: 0, credit: 141.00 },
+  '2026-06-22': { especes: 2086.75, cheques: 0.0, tpe: 1688.89, bonsAchat: 543.0, avoir: 0, credit: 45.10 },
+  '2026-06-23': { especes: 1355.39, cheques: 0.0, tpe: 700.9, bonsAchat: 599.8, avoir: 0, credit: 32.60 },
+  '2026-06-24': { especes: 2047.21, cheques: 0.0, tpe: 1756.5, bonsAchat: 68.4, avoir: 0, credit: 239.70 },
+  '2026-06-25': { especes: 2384.7, cheques: 0.0, tpe: 788.28, bonsAchat: 391.9, avoir: 0, credit: 168.10 },
+  '2026-06-26': { especes: 1565.61, cheques: 0.0, tpe: 1541.3, bonsAchat: 119.5, avoir: 0, credit: 279.50 },
+  '2026-06-27': { especes: 2651.28, cheques: 0.0, tpe: 1594.1, bonsAchat: 132.5, avoir: 0, credit: 216.40 },
+  '2026-06-28': { especes: 1727.16, cheques: 0.0, tpe: 2282.3, bonsAchat: 372.2, avoir: 0, credit: 96.30 },
+  '2026-06-29': { especes: 2326.5, cheques: 30.0, tpe: 1999.5, bonsAchat: 319.5, avoir: 0, credit: 22.50 },
+  '2026-06-30': { especes: 2008.42, cheques: 42.25, tpe: 1227.65, bonsAchat: 247.15, avoir: 0, credit: 47.20 },
 };
 
 app.post('/api/seed-juin-2026', (req, res) => {
@@ -606,10 +612,10 @@ app.post('/api/seed-juin-2026', (req, res) => {
       byDay[date].push({ num, client, ht0, ht19, tva, ttc });
     }
 
-    const insertR = db.prepare('INSERT OR REPLACE INTO rapport_modes (id, dossier_id, date_jour, especes, cheques, tpe, bonsAchat, avoir) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const insertR = db.prepare('INSERT OR REPLACE INTO rapport_modes (id, dossier_id, date_jour, especes, cheques, tpe, bonsAchat, avoir, credit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const [date, rapport] of Object.entries(RAPPORT_MODES_JUIN)) {
       if (rapport && rapport.especes > 0) {
-        insertR.run(genId(), d.id, date, rapport.especes, rapport.cheques, rapport.tpe, rapport.bonsAchat, rapport.avoir);
+        insertR.run(genId(), d.id, date, rapport.especes, rapport.cheques, rapport.tpe, rapport.bonsAchat, rapport.avoir, rapport.credit || 0);
       }
     }
 
@@ -624,16 +630,17 @@ app.post('/api/seed-juin-2026', (req, res) => {
       const timbres = dayF.reduce((s, f) => s + (f.timbre || 1), 0);
       const totalTTC = Math.round(dayF.reduce((s, f) => s + f.ttc, 0) * 1000) / 1000;
       
-      const rapport = RAPPORT_MODES_JUIN[date] || { especes: totalTTC, cheques: 0, tpe: 0, bonsAchat: 0, avoir: 0 };
+      const rapport = RAPPORT_MODES_JUIN[date] || { especes: totalTTC, cheques: 0, tpe: 0, bonsAchat: 0, avoir: 0, credit: 0 };
 
       const avoir709 = (rapport.bonsAchat || 0) + (rapport.avoir || 0);
-      const debitSum = (rapport.especes || 0) + (rapport.tpe || 0) + (rapport.cheques || 0) + avoir709;
+      const debitSum = (rapport.especes || 0) + (rapport.tpe || 0) + (rapport.cheques || 0) + avoir709 + (rapport.credit || 0);
       const creditSum = tva19 + timbres + totalHT0 + totalHT19;
       const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
 
       if ((rapport.especes || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', 'D', rapport.especes, null);
       if ((rapport.tpe || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411005', 'D', rapport.tpe, null);
       if ((rapport.cheques || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411003', 'D', rapport.cheques, null);
+      if ((rapport.credit || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411006', 'D', rapport.credit, null);
       if (totalHT0 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707200', 'C', totalHT0, null);
       if (totalHT19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707219', 'C', totalHT19, null);
       if (tva19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '436711', 'C', tva19, null);
@@ -689,14 +696,14 @@ app.listen(PORT, '0.0.0.0', () => {
         console.log('Auto-seeding June 2026 data...');
         const insertF = db.prepare('INSERT INTO factures (id, dossier_id, societe_id, date_facture, numero_facture, client, total_ht_0, total_ht_19, tva_19, timbre, total_ttc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         const insertE = db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte, sens, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        const insertR = db.prepare('INSERT OR REPLACE INTO rapport_modes (id, dossier_id, date_jour, especes, cheques, tpe, bonsAchat, avoir) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        const insertR = db.prepare('INSERT OR REPLACE INTO rapport_modes (id, dossier_id, date_jour, especes, cheques, tpe, bonsAchat, avoir, credit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         const txn = db.transaction(() => {
           for (const [num, date, client, ht0, ht19, tva, timbre, ttc] of JUIN_2026_DATA) {
             insertF.run(genId(), d.id, d.societe_id, date, num, client, ht0, ht19, tva, timbre, ttc);
           }
           for (const [date, rapport] of Object.entries(RAPPORT_MODES_JUIN)) {
             if (rapport && rapport.especes > 0) {
-              insertR.run(genId(), d.id, date, rapport.especes, rapport.cheques, rapport.tpe, rapport.bonsAchat, rapport.avoir);
+              insertR.run(genId(), d.id, date, rapport.especes, rapport.cheques, rapport.tpe, rapport.bonsAchat, rapport.avoir, rapport.credit || 0);
             }
           }
           const byDay = {};
@@ -713,14 +720,15 @@ app.listen(PORT, '0.0.0.0', () => {
             const totalHT19 = Math.round(dayF.reduce((s, f) => s + f.ht19, 0) * 1000) / 1000;
             const tva19 = Math.round(dayF.reduce((s, f) => s + f.tva, 0) * 1000) / 1000;
             const timbres = dayF.reduce((s, f) => s + (f.timbre || 1), 0);
-            const rapport = RAPPORT_MODES_JUIN[date] || { especes: totalTTC, cheques: 0, tpe: 0, bonsAchat: 0, avoir: 0 };
+            const rapport = RAPPORT_MODES_JUIN[date] || { especes: totalTTC, cheques: 0, tpe: 0, bonsAchat: 0, avoir: 0, credit: 0 };
             const avoir709 = (rapport.bonsAchat || 0) + (rapport.avoir || 0);
-            const debitSum = (rapport.especes || 0) + (rapport.tpe || 0) + (rapport.cheques || 0) + avoir709;
+            const debitSum = (rapport.especes || 0) + (rapport.tpe || 0) + (rapport.cheques || 0) + avoir709 + (rapport.credit || 0);
             const creditSum = tva19 + timbres + totalHT0 + totalHT19;
             const ecart = Math.round((debitSum - creditSum) * 1000) / 1000;
             if ((rapport.especes || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411004', 'D', rapport.especes, null);
             if ((rapport.tpe || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411005', 'D', rapport.tpe, null);
             if ((rapport.cheques || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411003', 'D', rapport.cheques, null);
+            if ((rapport.credit || 0) > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '411006', 'D', rapport.credit, null);
             if (totalHT0 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707200', 'C', totalHT0, null);
             if (totalHT19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '707219', 'C', totalHT19, null);
             if (tva19 > 0) insertE.run(genId(), d.id, d.societe_id, 'VT J.C', date, date, numPiece, libelle, '436711', 'C', tva19, null);
