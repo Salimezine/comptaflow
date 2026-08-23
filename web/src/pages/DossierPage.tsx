@@ -121,9 +121,42 @@ export default function DossierPage() {
     if (!id) return;
     const csv = await api.exportCSV(id);
     const lines = csv.trim().split('\n');
-    const headers = lines[0].split(';');
+    const csvHeaders = lines[0].split(';');
     const rows = lines.slice(1).map(l => l.split(';'));
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+
+    const xlsxHeaders = ['Date operation', 'Date piece', 'Journal', 'N doc', 'Libelle', 'Compte', 'Sens', 'Montant', 'Tresorerie'];
+    const data = [xlsxHeaders];
+
+    for (const row of rows) {
+      const dateOp = row[0] || '';
+      const datePiece = row[1] || '';
+      const formatDate = (d: string) => {
+        if (d.includes('-')) {
+          const [y, m, day] = d.split('-');
+          return `${day}/${m}/${y}`;
+        }
+        return d;
+      };
+      data.push([
+        formatDate(dateOp),
+        formatDate(datePiece),
+        row[2] || '',
+        row[3] || '',
+        row[4] || '',
+        row[5] || '',
+        row[6] || '',
+        Math.abs(parseFloat(row[7]) || 0).toFixed(3),
+        row[8] || ''
+      ]);
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(data);
+
+    ws['!cols'] = [
+      { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 18 },
+      { wch: 30 }, { wch: 8 }, { wch: 6 }, { wch: 12 }, { wch: 12 }
+    ];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Ecritures');
     XLSX.writeFile(wb, 'ecritures_' + (dossier?.nom || id) + '.xlsx');
