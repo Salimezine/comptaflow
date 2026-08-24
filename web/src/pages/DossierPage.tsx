@@ -21,8 +21,6 @@ export default function DossierPage() {
   const [ocrProgress, setOcrProgress] = useState('');
   const [generating, setGenerating] = useState(false);
   const [vtjcResult, setVtjcResult] = useState<any>(null);
-  const [vtcLoading, setVtcLoading] = useState(false);
-  const vtcFileRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [fDate, setFDate] = useState(new Date().toISOString().split('T')[0]);
@@ -49,9 +47,16 @@ export default function DossierPage() {
     setUploading(true);
     setOcrProgress('Traitement de ' + files.length + ' fichier(s)...');
     try {
-      const result = await api.process(id, Array.from(files));
-      const ok = result.results.filter((r: any) => r.ok).length;
-      setOcrProgress(ok + ' facture(s) extraite(s).');
+      if (journal === 'VT J.C') {
+        const result = await api.process(id, Array.from(files));
+        const ok = result.results.filter((r: any) => r.ok).length;
+        setOcrProgress(ok + ' facture(s) extraite(s). Generation VT J.C...');
+        await api.generateVTJC(id);
+        setOcrProgress('Termine! ' + ok + ' facture(s) + ecritures generees');
+      } else {
+        const r = await api.processVTC(id, Array.from(files));
+        setOcrProgress('Termine! ' + r.totalEntries + ' ecriture(s) VT C extraite(s)');
+      }
       await reload();
     } catch (e: any) { alert('Erreur: ' + e.message); }
     finally { setUploading(false); setTimeout(() => setOcrProgress(''), 3000); }
@@ -77,19 +82,12 @@ export default function DossierPage() {
   };
 
   const generate = async () => {
-    if (!id) return;
+    if (!id || journal !== 'VT J.C') return;
     setGenerating(true);
     setVtjcResult(null);
     try {
-      if (journal === 'VT J.C') {
-        const result = await api.generateVTJC(id);
-        setVtjcResult(result);
-      } else {
-        const input = vtcFileRef.current;
-        if (!input?.files?.length) { alert('Uploadez le(s) PDF VT C d\'abord'); setGenerating(false); return; }
-        const r = await api.processVTC(id, Array.from(input.files));
-        setVtjcResult({ days: 0, entries: [], anomalies: [], vtcCount: r.totalEntries });
-      }
+      const result = await api.generateVTJC(id);
+      setVtjcResult(result);
       reload();
     } catch (e: any) { alert('Erreur: ' + e.message); }
     finally { setGenerating(false); }
@@ -338,28 +336,16 @@ export default function DossierPage() {
               </table>
             </div>
           )}
-          <div className="bg-white rounded-xl border p-5">
-            <h2 className="font-semibold mb-3">{isVTJC ? 'Generer les ecritures VT J.C' : 'Generer les ecritures VT C'}</h2>
-            {isVTC && (
-              <div className="mb-3">
-                <p className="text-xs text-gray-500 mb-2">Uploadez le(s) PDF "Edition facture vente" :</p>
-                <input ref={vtcFileRef} type="file" accept=".pdf" multiple className="hidden" />
-                <button onClick={() => vtcFileRef.current?.click()} className="bg-teal-100 text-teal-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-200 flex items-center gap-1.5 mb-2">
-                  <Upload className="w-4 h-4" /> Choisir PDF VT C
-                </button>
-                {vtcFileRef.current?.files?.length && <p className="text-xs text-teal-600">{vtcFileRef.current.files.length} fichier(s) selectionne(s)</p>}
-              </div>
-            )}
-            <p className="text-xs text-gray-500 mb-3">
-              {isVTJC
-                ? 'Calcule les ecritures a partir des factures + rapport.'
-                : 'Extrait les ecritures directement du PDF (comptes 707100/707119).'}
-            </p>
-            <button onClick={generate} disabled={generating || (isVTJC && !factures.length)} className={`${isVTJC ? 'bg-violet-600 hover:bg-violet-700' : 'bg-teal-600 hover:bg-teal-700'} text-white px-5 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50 flex items-center gap-1.5`}>
-              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : isVTJC ? <Zap className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
-              {generating ? 'Generation...' : isVTJC ? 'Generer VT J.C' : 'Generer VT C'}
-            </button>
-          </div>
+          {isVTJC && (
+            <div className="bg-white rounded-xl border p-5">
+              <h2 className="font-semibold mb-3">Generer les ecritures VT J.C</h2>
+              <p className="text-xs text-gray-500 mb-3">Calcule les ecritures a partir des factures + rapport.</p>
+              <button onClick={generate} disabled={generating || !factures.length} className="bg-violet-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1.5">
+                {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                {generating ? 'Generation...' : 'Generer VT J.C'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
