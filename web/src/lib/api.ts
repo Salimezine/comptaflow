@@ -29,6 +29,13 @@ export const api = {
   addEcriture: (did: string, d: any) => req<any>(`/dossiers/${did}/ecritures`, { method: 'POST', body: JSON.stringify(d) }),
   deleteEcriture: (eid: string) => req<any>(`/ecritures/${eid}`, { method: 'DELETE' }),
   deleteAllEcritures: (did: string) => req<any>(`/dossiers/${did}/ecritures`, { method: 'DELETE' }),
+  processVTC: async (did: string, files: File[]) => {
+    const fd = new FormData();
+    files.forEach(f => fd.append('files', f));
+    const r = await fetch(`${BASE}/dossiers/${did}/process-vtc`, { method: 'POST', body: fd });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Erreur ${r.status}`);
+    return r.json();
+  },
   exportCSV: (did: string) => req<string>(`/dossiers/${did}/export`),
   getFactures: (did: string) => req<any[]>(`/dossiers/${did}/factures`),
   addFacture: (did: string, d: any) => req<any>(`/dossiers/${did}/factures`, { method: 'POST', body: JSON.stringify(d) }),

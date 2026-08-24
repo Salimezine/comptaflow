@@ -10,7 +10,7 @@ export default function DossierPage() {
   const [pieces, setPieces] = useState<any[]>([]);
   const [ecritures, setEcritures] = useState<any[]>([]);
   const [factures, setFactures] = useState<any[]>([]);
-  const [tab, setTab] = useState<'factures' | 'ecritures' | 'pieces' | 'rapport' | 'analyse'>('factures');
+  const [tab, setTab] = useState<'factures' | 'ecritures' | 'pieces' | 'rapport' | 'analyse' | 'vtc'>('factures');
   const [rapport, setRapport] = useState<any[]>([]);
   const [analyse, setAnalyse] = useState<any[]>([]);
   const [analyseLoading, setAnalyseLoading] = useState(false);
@@ -21,6 +21,8 @@ export default function DossierPage() {
   const [dragOver, setDragOver] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [vtjcResult, setVtjcResult] = useState<any>(null);
+  const [vtcLoading, setVtcLoading] = useState(false);
+  const vtcFileRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
 
@@ -100,6 +102,18 @@ export default function DossierPage() {
   };
   const delRapport = async () => { if (!id || !confirm('Supprimer rapport?')) return; await api.deleteRapport(id); reload(); };
 
+  const handleVTC = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files?.length || !id) return;
+    setVtcLoading(true);
+    try {
+      const r = await api.processVTC(id, Array.from(files));
+      alert('VT C: ' + r.totalEntries + ' écriture(s) extraite(s)');
+      reload();
+    } catch (e: any) { alert('Erreur VT C: ' + e.message); }
+    finally { setVtcLoading(false); if (vtcFileRef.current) vtcFileRef.current.value = ''; }
+  };
+
   const loadAnalyse = async () => {
     if (!id) return;
     setAnalyseLoading(true);
@@ -123,7 +137,7 @@ export default function DossierPage() {
     const lines = csv.trim().split('\n');
     const rows = lines.slice(1).map(l => l.split(';'));
 
-    const xlsxHeaders = ['Date operation', 'Date piece', 'Journal', 'N doc', 'Libelle', 'Compte', 'Debit', 'Credit', 'Tresorerie'];
+    const xlsxHeaders = ['N° pièce comptable', 'Date pièce comptable', 'Journal', 'Libellé', 'N° compte', 'Libellé trésorerie', 'Débit', 'Crédit'];
     const data = [xlsxHeaders];
 
     for (const row of rows) {
@@ -136,15 +150,15 @@ export default function DossierPage() {
       const debit = sens === 'D' ? montant : '0.000';
       const credit = sens === 'C' ? montant : '0.000';
       data.push([
-        formatDate(row[0] || ''), formatDate(row[1] || ''), row[2] || '', row[3] || '',
-        row[4] || '', row[5] || '', debit, credit, row[8] || ''
+        row[3] || '', formatDate(row[0] || ''), row[2] || '', row[4] || '',
+        row[5] || '', row[8] || '', debit, credit
       ]);
     }
 
     const ws = XLSX.utils.aoa_to_sheet(data);
     ws['!cols'] = [
-      { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 18 },
-      { wch: 30 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 12 }
+      { wch: 20 }, { wch: 18 }, { wch: 8 }, { wch: 30 },
+      { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 14 }
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Ecritures');
@@ -174,9 +188,9 @@ export default function DossierPage() {
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        {(['factures', 'ecritures', 'pieces', 'rapport', 'analyse'] as const).map(t => (
+        {(['factures', 'ecritures', 'pieces', 'rapport', 'analyse', 'vtc'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-lg text-sm font-medium capitalize ${tab === t ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-            {t === 'analyse' ? <><AlertTriangle className="w-3 h-3 inline mr-1" />Analyse</> : t} {t === 'factures' ? `(${factures.length})` : t === 'ecritures' ? `(${ecritures.length})` : t === 'pieces' ? `(${pieces.length})` : t === 'rapport' ? `(${rapport.length})` : ''}
+            {t === 'analyse' ? <><AlertTriangle className="w-3 h-3 inline mr-1" />Analyse</> : t === 'vtc' ? 'VT C' : t} {t === 'factures' ? `(${factures.length})` : t === 'ecritures' ? `(${ecritures.length})` : t === 'pieces' ? `(${pieces.length})` : t === 'rapport' ? `(${rapport.length})` : ''}
           </button>
         ))}
       </div>
@@ -247,9 +261,52 @@ export default function DossierPage() {
                     </div>
                   ))}
                 </div>
+          )}
+        </div>
+      )}
+
+      {/* VT C */}
+      {(tab as string) === 'vtc' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border p-5">
+            <h2 className="font-semibold mb-2">Journal VT C — Ecritures directes</h2>
+            <p className="text-xs text-gray-500 mb-3">Upload le PDF "Edition facture vente" du journal VT C. Le PDF contient déjà les écritures comptables (411004, 707100, 436710, etc.). Extraction automatique.</p>
+            <input ref={vtcFileRef} type="file" accept=".pdf" multiple className="hidden" onChange={handleVTC} />
+            <div className="flex gap-2">
+              <button onClick={() => vtcFileRef.current?.click()} disabled={vtcLoading} className="bg-teal-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50 flex items-center gap-1.5">
+                {vtcLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} {vtcLoading ? 'Extraction...' : 'Upload PDF VT C'}
+              </button>
+              {ecritures.filter(e => e.journal_code === 'VT C').length > 0 && (
+                <button onClick={async () => { if (!id || !confirm('Supprimer toutes les écritures VT C?')) return; await api.deleteAllEcritures(id); reload(); }} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1">
+                  <Trash2 className="w-4 h-4" /> Supprimer VT C
+                </button>
               )}
             </div>
+            {vtcLoading && <p className="text-xs text-blue-600 mt-2">Extraction en cours...</p>}
+          </div>
+          {ecritures.filter(e => e.journal_code === 'VT C').length > 0 && (
+            <div className="bg-white rounded-xl border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
+                  <th className="px-3 py-2">Date</th><th className="px-3 py-2">N Doc</th><th className="px-3 py-2">Libellé</th><th className="px-3 py-2">Compte</th><th className="px-3 py-2">Sens</th><th className="px-3 py-2 text-right">Montant</th>
+                </tr></thead>
+                <tbody className="divide-y divide-gray-100">
+                  {ecritures.filter(e => e.journal_code === 'VT C').map(e => (
+                    <tr key={e.id} className="hover:bg-gray-50">
+                      <td className="px-3 py-2">{e.date_operation}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{e.numero_doc || '-'}</td>
+                      <td className="px-3 py-2">{e.libelle}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{e.compte}</td>
+                      <td className="px-3 py-2"><span className={e.sens === 'D' ? 'text-emerald-600 font-bold' : 'text-blue-600 font-bold'}>{e.sens}</span></td>
+                      <td className="px-3 py-2 text-right font-mono">{(e.montant || 0).toFixed(3)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
+        </div>
+      )}
         </div>
       )}
 

@@ -365,6 +365,84 @@ app.get('/api/dossiers/:did/pieces', (req, res) => {
   res.json(db.prepare('SELECT * FROM pieces WHERE dossier_id = ? ORDER BY created_at').all(req.params.did));
 });
 
+// --- PROCESS VT C PDF (ecritures directes) ---
+const DEBIT_ACCOUNTS = new Set(['411004', '411003', '411005', '709500']);
+const CREDIT_ACCOUNTS = new Set(['707100', '707119', '436710', '437500', '436610']);
+const ECART_ACCOUNT = '634500';
+
+app.post('/api/dossiers/:did/process-vtc', upload.array('files', 50), async (req, res) => {
+  try {
+    const did = req.params.did;
+    const d = db.prepare('SELECT * FROM dossiers WHERE id = ?').get(did);
+    if (!d) return res.status(404).json({ error: 'Dossier non trouve' });
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Aucun fichier envoye' });
+
+    db.prepare("DELETE FROM ecritures WHERE dossier_id = ? AND journal_code = 'VT C'").run(did);
+
+    const insertE = db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte, sens, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    let totalEntries = 0;
+    const results = [];
+
+    for (const f of req.files) {
+      try {
+        const text = await extractTextFromPDF(f.path);
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+        let count = 0;
+        let i = 0;
+        while (i < lines.length) {
+          const line = lines[i];
+          const m = line.match(/(\d{2}\/\d{2}\/\d{4})\s+FAC\s+(?:N°)?(\d+\/\d+)\s+(\d{6})\s+([\d\s]+,\d{3})/);
+          if (m) {
+            const date = m[1].replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1');
+            const facNum = 'FAC ' + m[2] + '/26';
+            const compte = m[3];
+            const montant = parseFloat(m[4].replace(/\s/g, '').replace(',', '.'));
+            let libelle = 'CLIENTS PASSAGERS';
+            if (i + 1 < lines.length && !lines[i + 1].match(/\d{2}\/\d{2}\/\d{4}/)) {
+              libelle = lines[i + 1].replace(/FAC\s+(?:N°)?\d+\/\d+\s*/, '').trim() || libelle;
+            }
+
+            let sens;
+            if (compte === ECART_ACCOUNT) {
+              const dayEntries = [];
+              let j = i - 1;
+              while (j >= 0 && lines[j].match(/\d{2}\/\d{2}\/\d{4}/)) {
+                const prev = lines[j].match(/(\d{6})\s+([\d\s]+,\d{3})/);
+                if (prev) dayEntries.push({ compte: prev[1], montant: parseFloat(prev[2].replace(/\s/g, '').replace(',', '.')) });
+                j--;
+              }
+              const totalD = dayEntries.filter(e => DEBIT_ACCOUNTS.has(e.compte)).reduce((s, e) => s + e.montant, 0);
+              const totalC = dayEntries.filter(e => CREDIT_ACCOUNTS.has(e.compte)).reduce((s, e) => s + e.montant, 0);
+              sens = totalD > totalC ? 'C' : 'D';
+            } else {
+              sens = DEBIT_ACCOUNTS.has(compte) ? 'D' : 'C';
+            }
+
+            insertE.run(genId(), did, d.societe_id, 'VT C', date, date, facNum, libelle, compte, sens, montant, null);
+            count++;
+            i += 2;
+          } else {
+            i++;
+          }
+        }
+        totalEntries += count;
+        results.push({ file: f.originalname, entries: count, ok: true });
+      } catch (e) {
+        results.push({ file: f.originalname, error: e.message, ok: false });
+      } finally {
+        try { fs.unlinkSync(f.path); } catch {}
+      }
+    }
+
+    db.prepare('UPDATE dossiers SET nb_ecritures = (SELECT COUNT(*) FROM ecritures WHERE dossier_id = ?) WHERE id = ?').run(did, did);
+    res.json({ processed: results.length, totalEntries, results });
+  } catch (e) {
+    console.error('Process VT C error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- ECRITURES ---
 app.get('/api/dossiers/:did/ecritures', (req, res) => {
   res.json(db.prepare('SELECT * FROM ecritures WHERE dossier_id = ? ORDER BY date_operation, journal_code').all(req.params.did));
