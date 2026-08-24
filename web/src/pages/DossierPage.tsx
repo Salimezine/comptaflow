@@ -124,17 +124,33 @@ export default function DossierPage() {
   const exportXLSX = () => {
     if (!id) return;
     const data = ecrituresFiltered.sort((a, b) => (a.date_operation || '').localeCompare(b.date_operation || ''));
-    const xlsxHeaders = ['N piece comptable', 'Date piece comptable', 'Journal', 'Libelle', 'N compte', 'Libelle tresorerie', 'Debit', 'Credit'];
+
+    const ACCOUNT_LABELS: Record<string, string> = {
+      '411004': 'CLIENTS PASSAGERS ESPECES', '411003': 'CLIENTS PASSAGERS CHEQUES',
+      '411005': 'CLIENTS PASSAGERS TPE', '709500': 'AVOIRS FINACIERS',
+      '707100': 'VENTES MARCHANDISES C 0%', '707119': 'VENTES MARCHANDISES C 19%',
+      '707200': 'VENTES MARCHANDISES C 0%', '707219': 'VENTES MARCHANDISES C 19%',
+      '436710': 'TVA COLLECTEE 19%', '436711': 'TVA COLLECTEE 19%',
+      '437500': 'TIMBRE FISCAL', '634500': 'ECARTS DE REGLEMENT',
+    };
+
+    const fmt = (d: string) => { if (d?.includes('-')) { const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; } return d || ''; };
+
+    const xlsxHeaders = ['N° pièce comptable', 'Date pièce comptable', 'Journal', 'Libellé', 'N° compte', 'Libellé trésorerie', 'Débit', 'Crédit'];
     const xlsxRows = [xlsxHeaders];
+
     for (const e of data) {
-      const fmt = (d: string) => { if (d?.includes('-')) { const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; } return d || ''; };
+      const acctLabel = ACCOUNT_LABELS[e.compte] || e.compte || '';
       xlsxRows.push([
         e.numero_doc || '', fmt(e.date_operation || ''), e.journal_code || '', e.libelle || '',
-        e.compte || '', e.tresorerie || '', e.sens === 'D' ? (e.montant || 0).toFixed(3) : '0.000', e.sens === 'C' ? (e.montant || 0).toFixed(3) : '0.000'
+        e.compte || '', acctLabel,
+        e.sens === 'D' ? (e.montant || 0).toFixed(3) : '0.000',
+        e.sens === 'C' ? (e.montant || 0).toFixed(3) : '0.000'
       ]);
     }
+
     const ws = XLSX.utils.aoa_to_sheet(xlsxRows);
-    ws['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 8 }, { wch: 30 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+    ws['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 8 }, { wch: 35 }, { wch: 10 }, { wch: 30 }, { wch: 14 }, { wch: 14 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Ecritures');
     XLSX.writeFile(wb, 'ecritures_' + (journal || 'ALL').replace(' ', '') + '_' + (dossier?.nom || id) + '.xlsx');
