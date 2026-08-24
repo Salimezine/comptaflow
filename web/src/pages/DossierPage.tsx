@@ -129,38 +129,37 @@ export default function DossierPage() {
     URL.revokeObjectURL(url);
   };
 
-  const exportXLSX = async () => {
+  const exportXLSX = async (journalFilter?: string) => {
     if (!id) return;
-    const csv = await api.exportCSV(id);
-    const lines = csv.trim().split('\n');
-    const rows = lines.slice(1).map(l => l.split(';'));
+    const data = ecritures
+      .filter(e => journalFilter ? e.journal_code === journalFilter : true)
+      .sort((a, b) => (a.date_operation || '').localeCompare(b.date_operation || ''));
 
     const xlsxHeaders = ['N° pièce comptable', 'Date pièce comptable', 'Journal', 'Libellé', 'N° compte', 'Libellé trésorerie', 'Débit', 'Crédit'];
-    const data = [xlsxHeaders];
+    const xlsxRows = [xlsxHeaders];
 
-    for (const row of rows) {
+    for (const e of data) {
       const formatDate = (d: string) => {
-        if (d.includes('-')) { const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; }
-        return d;
+        if (d && d.includes('-')) { const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; }
+        return d || '';
       };
-      const sens = (row[6] || '').trim().toUpperCase();
-      const montant = Math.abs(parseFloat(row[7]) || 0).toFixed(3);
-      const debit = sens === 'D' ? montant : '0.000';
-      const credit = sens === 'C' ? montant : '0.000';
-      data.push([
-        row[3] || '', formatDate(row[0] || ''), row[2] || '', row[4] || '',
-        row[5] || '', row[8] || '', debit, credit
+      const debit = e.sens === 'D' ? (e.montant || 0).toFixed(3) : '0.000';
+      const credit = e.sens === 'C' ? (e.montant || 0).toFixed(3) : '0.000';
+      xlsxRows.push([
+        e.numero_doc || '', formatDate(e.date_operation || ''), e.journal_code || '', e.libelle || '',
+        e.compte || '', e.tresorerie || '', debit, credit
       ]);
     }
 
-    const ws = XLSX.utils.aoa_to_sheet(data);
+    const ws = XLSX.utils.aoa_to_sheet(xlsxRows);
     ws['!cols'] = [
       { wch: 20 }, { wch: 18 }, { wch: 8 }, { wch: 30 },
       { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 14 }
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Ecritures');
-    XLSX.writeFile(wb, 'ecritures_' + (dossier?.nom || id) + '.xlsx');
+    const suffix = journalFilter ? journalFilter.replace('.', '').replace(' ', '') : 'ALL';
+    XLSX.writeFile(wb, 'ecritures_' + suffix + '_' + (dossier?.nom || id) + '.xlsx');
   };
 
   if (loading) return <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
@@ -184,13 +183,25 @@ export default function DossierPage() {
             <h1 className="text-xl font-bold">{dossier?.nom}</h1>
             <p className="text-sm text-gray-500">{factures.length} facture(s) | {ecrituresVTJC.length} VT J.C | {ecrituresVTC.length} VT C | {rapport.length} rapport(s)</p>
           </div>
-          <div className="flex gap-2">
-            <button onClick={exportCSV} disabled={!ecritures.length} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
-              <Download className="w-4 h-4" /> CSV
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={exportCSV} disabled={!ecritures.length} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1">
+              <Download className="w-3 h-3" /> CSV
             </button>
-            <button onClick={exportXLSX} disabled={!ecritures.length} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1.5">
-              <FileSpreadsheet className="w-4 h-4" /> XLSX
-            </button>
+            {ecrituresVTJC.length > 0 && (
+              <button onClick={() => exportXLSX('VT J.C')} className="bg-violet-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-violet-700 flex items-center gap-1">
+                <FileSpreadsheet className="w-3 h-3" /> XLSX VT J.C
+              </button>
+            )}
+            {ecrituresVTC.length > 0 && (
+              <button onClick={() => exportXLSX('VT C')} className="bg-teal-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-teal-700 flex items-center gap-1">
+                <FileSpreadsheet className="w-3 h-3" /> XLSX VT C
+              </button>
+            )}
+            {ecritures.length > 0 && (
+              <button onClick={() => exportXLSX()} className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-emerald-700 flex items-center gap-1">
+                <FileSpreadsheet className="w-3 h-3" /> XLSX Tout
+              </button>
+            )}
           </div>
         </div>
       </div>
