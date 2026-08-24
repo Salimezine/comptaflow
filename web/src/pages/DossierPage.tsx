@@ -344,6 +344,10 @@ export default function DossierPage() {
               <div className="mb-3">
                 <p className="text-xs text-gray-500 mb-2">Uploadez le(s) PDF "Edition facture vente" :</p>
                 <input ref={vtcFileRef} type="file" accept=".pdf" multiple className="hidden" />
+                <button onClick={() => vtcFileRef.current?.click()} className="bg-teal-100 text-teal-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-200 flex items-center gap-1.5 mb-2">
+                  <Upload className="w-4 h-4" /> Choisir PDF VT C
+                </button>
+                {vtcFileRef.current?.files?.length && <p className="text-xs text-teal-600">{vtcFileRef.current.files.length} fichier(s) selectionne(s)</p>}
               </div>
             )}
             <p className="text-xs text-gray-500 mb-3">
@@ -351,7 +355,7 @@ export default function DossierPage() {
                 ? 'Calcule les ecritures a partir des factures + rapport.'
                 : 'Extrait les ecritures directement du PDF (comptes 707100/707119).'}
             </p>
-            <button onClick={generate} disabled={generating || !factures.length} className={`${isVTJC ? 'bg-violet-600 hover:bg-violet-700' : 'bg-teal-600 hover:bg-teal-700'} text-white px-5 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50 flex items-center gap-1.5`}>
+            <button onClick={generate} disabled={generating || (isVTJC && !factures.length)} className={`${isVTJC ? 'bg-violet-600 hover:bg-violet-700' : 'bg-teal-600 hover:bg-teal-700'} text-white px-5 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50 flex items-center gap-1.5`}>
               {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : isVTJC ? <Zap className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
               {generating ? 'Generation...' : isVTJC ? 'Generer VT J.C' : 'Generer VT C'}
             </button>
