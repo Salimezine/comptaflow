@@ -375,48 +375,41 @@ function parseVTCLines(text) {
   const allAccounts = [...DEBIT_ACCOUNTS_VTC, ...CREDIT_ACCOUNTS_VTC, ECART_ACCOUNT_VTC];
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
+  let currentFacNum = null;
+
   for (const line of lines) {
-    if (line.includes('Total écritures') || line.includes('Journal') || line.includes('Du 01/') || line.includes('ANIMAL CITY') || line.includes('RESD HORIZON') || /^\d+ \/9/.test(line) || /^\d{2}\/\d{2}\/\d{4}\s+\d{2}\.\d{2}\.\d{2}$/.test(line)) continue;
-
-    const dateMatch = line.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-    if (!dateMatch) continue;
-    const date = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
-
     const facMatch = line.match(/FAC\s*(?:N[°o]?\s*)?(\d+[-\/]\d+)/i);
-    const facNum = facMatch ? facMatch[1].replace('-', '/') : null;
+    if (facMatch) {
+      currentFacNum = facMatch[1].replace('-', '/');
+    }
 
-    for (const acct of allAccounts) {
-      const acctRegex = new RegExp(acct + '\\s*([\\d][\\d\\s]*[,\\.]\\d{3})');
-      const acctMatch = line.match(acctRegex);
-      if (acctMatch) {
-        const montant = parseFloat(acctMatch[1].replace(/\s/g, '').replace(',', '.'));
-        if (isNaN(montant) || montant === 0) continue;
-
-        let libelle = '';
-        const afterAmount = line.substring(line.indexOf(acctMatch[0]) + acctMatch[0].length).trim();
-        if (afterAmount) {
-          libelle = afterAmount.replace(/FAC\s*(?:N[°o]?\s*)?\d+[-\/]\d+/gi, '').trim();
+    const dateMatch = line.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (dateMatch) {
+      const date = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+      const amtLine = line;
+      for (const acct of allAccounts) {
+        const acctRegex = new RegExp('\\b' + acct + '\\b\\s+(.+?)\\s+([\\d][\\d\\s]*[,\\.]\\d{1,3})\\s*$');
+        const acctMatch = amtLine.match(acctRegex);
+        if (acctMatch) {
+          const montant = parseFloat(acctMatch[2].replace(/\s/g, '').replace(',', '.'));
+          if (isNaN(montant) || montant === 0) continue;
+          const libelle = acctMatch[1].trim();
+          entries.push({
+            date,
+            facNum: currentFacNum ? 'FAC ' + currentFacNum : null,
+            compte: acct,
+            compteLibelle: acct + ' ' + libelle,
+            montant,
+            libelle: libelle || 'CLIENTS PASSAGERS',
+          });
         }
-
-        entries.push({
-          date,
-          facNum: facNum ? 'FAC ' + facNum : null,
-          compte: acct,
-          montant,
-          libelle: libelle || 'CLIENTS PASSAGERS',
-        });
       }
     }
   }
 
-  const debits = entries.filter(e => DEBIT_ACCOUNTS_VTC.has(e.compte));
-  const credits = entries.filter(e => CREDIT_ACCOUNTS_VTC.has(e.compte));
-  const totalD = debits.reduce((s, e) => s + e.montant, 0);
-  const totalC = credits.reduce((s, e) => s + e.montant, 0);
-
   for (const e of entries) {
     if (e.compte === ECART_ACCOUNT_VTC) {
-      e.sens = totalD > totalC ? 'C' : 'D';
+      e.sens = 'D';
     } else {
       e.sens = DEBIT_ACCOUNTS_VTC.has(e.compte) ? 'D' : 'C';
     }
@@ -444,7 +437,7 @@ app.post('/api/dossiers/:did/process-vtc', upload.array('files', 50), async (req
         const entries = parseVTCLines(text);
 
         for (const e of entries) {
-          insertE.run(genId(), did, d.societe_id, 'VT C', e.date, e.date, e.facNum || f.originalname, e.libelle, e.compte, e.sens, e.montant, null);
+          insertE.run(genId(), did, d.societe_id, 'VT C', e.date, e.date, e.facNum || f.originalname, e.compteLibelle || e.libelle, e.compte, e.sens, e.montant, null);
         }
         totalEntries += entries.length;
         results.push({ file: f.originalname, entries: entries.length, ok: true });

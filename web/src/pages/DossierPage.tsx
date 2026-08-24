@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Upload, Plus, Trash2, Download, ArrowLeft, FileText, Zap, Loader2, AlertTriangle, FileSpreadsheet, ArrowRight } from 'lucide-react';
+import { Upload, Plus, Trash2, Download, ArrowLeft, FileText, Zap, Loader2, AlertTriangle, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { api } from '../lib/api';
 
@@ -11,7 +11,7 @@ export default function DossierPage() {
   const [ecritures, setEcritures] = useState<any[]>([]);
   const [factures, setFactures] = useState<any[]>([]);
   const [journal, setJournal] = useState<'VT J.C' | 'VT C' | null>(null);
-  const [tab, setTab] = useState<'input' | 'ecritures' | 'analyse'>('input');
+  const [tab, setTab] = useState<'factures' | 'rapport' | 'ecritures' | 'analyse'>('factures');
   const [rapport, setRapport] = useState<any[]>([]);
   const [analyse, setAnalyse] = useState<any[]>([]);
   const [analyseLoading, setAnalyseLoading] = useState(false);
@@ -23,6 +23,7 @@ export default function DossierPage() {
   const [vtjcResult, setVtjcResult] = useState<any>(null);
   const [vtcLoading, setVtcLoading] = useState(false);
   const vtcFileRef = useRef<HTMLInputElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const [fDate, setFDate] = useState(new Date().toISOString().split('T')[0]);
   const [fNum, setFNum] = useState('');
@@ -50,9 +51,7 @@ export default function DossierPage() {
     try {
       const result = await api.process(id, Array.from(files));
       const ok = result.results.filter((r: any) => r.ok).length;
-      setOcrProgress(ok + ' facture(s) extraite(s). Generation VT J.C...');
-      await api.generateVTJC(id);
-      setOcrProgress('Termine! ' + ok + ' facture(s) + ecritures generees');
+      setOcrProgress(ok + ' facture(s) extraite(s).');
       await reload();
     } catch (e: any) { alert('Erreur: ' + e.message); }
     finally { setUploading(false); setTimeout(() => setOcrProgress(''), 3000); }
@@ -71,19 +70,26 @@ export default function DossierPage() {
 
   const delFacture = async (fid: string) => { await api.deleteFacture(fid); reload(); };
   const delAllFactures = async () => {
-    if (!id || !confirm('Supprimer TOUT : factures + ecritures VT J.C + rapport ?')) return;
+    if (!id || !confirm('Supprimer TOUT : factures + ecritures + rapport ?')) return;
     await api.deleteAllFactures(id);
     await api.deleteRapport(id);
     reload();
   };
 
-  const generateVTJC = async () => {
+  const generate = async () => {
     if (!id) return;
     setGenerating(true);
     setVtjcResult(null);
     try {
-      const result = await api.generateVTJC(id);
-      setVtjcResult(result);
+      if (journal === 'VT J.C') {
+        const result = await api.generateVTJC(id);
+        setVtjcResult(result);
+      } else {
+        const input = vtcFileRef.current;
+        if (!input?.files?.length) { alert('Uploadez le(s) PDF VT C d\'abord'); setGenerating(false); return; }
+        const r = await api.processVTC(id, Array.from(input.files));
+        setVtjcResult({ days: 0, entries: [], anomalies: [], vtcCount: r.totalEntries });
+      }
       reload();
     } catch (e: any) { alert('Erreur: ' + e.message); }
     finally { setGenerating(false); }
@@ -97,18 +103,6 @@ export default function DossierPage() {
     if (rapportRef.current) rapportRef.current.value = '';
   };
   const delRapport = async () => { if (!id || !confirm('Supprimer rapport?')) return; await api.deleteRapport(id); reload(); };
-
-  const handleVTC = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files?.length || !id) return;
-    setVtcLoading(true);
-    try {
-      const r = await api.processVTC(id, Array.from(files));
-      alert('VT C: ' + r.totalEntries + ' ecriture(s) extraite(s)');
-      reload();
-    } catch (e: any) { alert('Erreur VT C: ' + e.message); }
-    finally { setVtcLoading(false); if (vtcFileRef.current) vtcFileRef.current.value = ''; }
-  };
 
   const loadAnalyse = async () => {
     if (!id) return;
@@ -143,8 +137,7 @@ export default function DossierPage() {
     ws['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 8 }, { wch: 30 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Ecritures');
-    const suffix = journal ? journal.replace(' ', '') : 'ALL';
-    XLSX.writeFile(wb, 'ecritures_' + suffix + '_' + (dossier?.nom || id) + '.xlsx');
+    XLSX.writeFile(wb, 'ecritures_' + (journal || 'ALL').replace(' ', '') + '_' + (dossier?.nom || id) + '.xlsx');
   };
 
   if (loading) return <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
@@ -159,24 +152,23 @@ export default function DossierPage() {
         <div className="max-w-lg mx-auto mt-8 space-y-4">
           <div className="bg-white rounded-xl border p-6 text-center">
             <h1 className="text-xl font-bold mb-1">{dossier?.nom}</h1>
-            <p className="text-sm text-gray-500 mb-6">Choisir le journal pour commencer :</p>
+            <p className="text-sm text-gray-500 mb-6">Choisir le journal :</p>
             <div className="grid grid-cols-2 gap-4">
-              <button onClick={() => { setJournal('VT J.C'); setTab('input'); }} className="border-2 border-violet-200 rounded-xl p-6 hover:border-violet-500 hover:bg-violet-50 transition-all group">
+              <button onClick={() => { setJournal('VT J.C'); setTab('factures'); }} className="border-2 border-violet-200 rounded-xl p-6 hover:border-violet-500 hover:bg-violet-50 transition-all group">
                 <Zap className="w-10 h-10 mx-auto text-violet-500 mb-3 group-hover:scale-110 transition-transform" />
                 <h3 className="font-semibold text-violet-700">VT J.C</h3>
-                <p className="text-xs text-gray-500 mt-1">Factures + Rapport → Calcul</p>
+                <p className="text-xs text-gray-500 mt-1">Factures → Calcul des ecritures</p>
                 <p className="text-xs text-gray-400 mt-2">{ecrituresVTJC.length} ecriture(s)</p>
               </button>
-              <button onClick={() => { setJournal('VT C'); setTab('input'); }} className="border-2 border-teal-200 rounded-xl p-6 hover:border-teal-500 hover:bg-teal-50 transition-all group">
+              <button onClick={() => { setJournal('VT C'); setTab('factures'); }} className="border-2 border-teal-200 rounded-xl p-6 hover:border-teal-500 hover:bg-teal-50 transition-all group">
                 <FileText className="w-10 h-10 mx-auto text-teal-500 mb-3 group-hover:scale-110 transition-transform" />
                 <h3 className="font-semibold text-teal-700">VT C</h3>
-                <p className="text-xs text-gray-500 mt-1">Upload PDF → Extraction directe</p>
+                <p className="text-xs text-gray-500 mt-1">Factures → Extraction PDF</p>
                 <p className="text-xs text-gray-400 mt-2">{ecrituresVTC.length} ecriture(s)</p>
               </button>
             </div>
           </div>
           <div className="flex gap-2 justify-center">
-            <button onClick={exportCSV} disabled={!ecritures.length} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"><Download className="w-4 h-4" /> CSV Tout</button>
             {ecrituresVTJC.length > 0 && <button onClick={() => { setJournal('VT J.C'); setTimeout(exportXLSX, 0); }} className="bg-violet-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-violet-700 flex items-center gap-1.5"><FileSpreadsheet className="w-4 h-4" /> XLSX VT J.C</button>}
             {ecrituresVTC.length > 0 && <button onClick={() => { setJournal('VT C'); setTimeout(exportXLSX, 0); }} className="bg-teal-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-700 flex items-center gap-1.5"><FileSpreadsheet className="w-4 h-4" /> XLSX VT C</button>}
           </div>
@@ -186,12 +178,13 @@ export default function DossierPage() {
   }
 
   const isVTJC = journal === 'VT J.C';
+  const isVTC = journal === 'VT C';
 
   return (
     <div className="space-y-6">
       <div>
         <div className="flex items-center gap-2 mb-1">
-          <button onClick={() => setJournal(null)} className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1"><ArrowLeft className="w-3 h-3" /> Retour</button>
+          <button onClick={() => { setJournal(null); setTab('factures'); }} className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1"><ArrowLeft className="w-3 h-3" /> Retour</button>
           <span className="text-gray-300">|</span>
           <span className="text-sm text-gray-400">{dossier?.nom}</span>
         </div>
@@ -200,7 +193,7 @@ export default function DossierPage() {
             <span className={`px-3 py-1 rounded-lg text-sm font-bold ${isVTJC ? 'bg-violet-100 text-violet-700' : 'bg-teal-100 text-teal-700'}`}>
               {isVTJC ? <Zap className="w-4 h-4 inline mr-1" /> : <FileText className="w-4 h-4 inline mr-1" />} {journal}
             </span>
-            <span className="text-sm text-gray-500">{ecrituresFiltered.length} ecriture(s) | {factures.length} facture(s)</span>
+            <span className="text-sm text-gray-500">{ecrituresFiltered.length} ecriture(s) | {factures.length} facture(s) | {rapport.length} jour(s) rapport</span>
           </div>
           <div className="flex gap-2">
             <button onClick={exportCSV} disabled={!ecrituresFiltered.length} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"><Download className="w-3 h-3" /> CSV</button>
@@ -210,23 +203,24 @@ export default function DossierPage() {
       </div>
 
       <div className="flex gap-2">
-        <button onClick={() => setTab('input')} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === 'input' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-          {isVTJC ? 'Factures & Rapport' : 'Upload PDF'}
-        </button>
-        <button onClick={() => setTab('ecritures')} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === 'ecritures' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-          Ecritures ({ecrituresFiltered.length})
-        </button>
-        {isVTJC && (
-          <button onClick={() => setTab('analyse')} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === 'analyse' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-            <AlertTriangle className="w-3 h-3 inline mr-1" /> Analyse
+        {(['factures', 'rapport', 'ecritures', 'analyse'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-lg text-sm font-medium capitalize ${tab === t ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+            {t === 'analyse' ? <><AlertTriangle className="w-3 h-3 inline mr-1" />Analyse</> : t} {t === 'factures' ? `(${factures.length})` : t === 'ecritures' ? `(${ecrituresFiltered.length})` : t === 'rapport' ? `(${rapport.length})` : ''}
           </button>
-        )}
+        ))}
       </div>
 
-      {tab === 'input' && isVTJC && (
+      {tab === 'factures' && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border p-5">
-            <h2 className="font-semibold mb-3">Ajouter une facture</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-semibold">Ajouter une facture</h2>
+              <input ref={fileRef} type="file" multiple accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => handleUpload(e.target.files)} />
+              <button onClick={() => fileRef.current?.click()} disabled={uploading} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1">
+                <Upload className="w-3 h-3" /> {uploading ? 'Extraction...' : 'Upload PDF(s)'}
+              </button>
+            </div>
+            {ocrProgress && <p className="text-xs text-blue-600 mb-2">{ocrProgress}</p>}
             <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
               <div><label className="block text-xs text-gray-500 mb-1">Date</label><input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={fDate} onChange={e => setFDate(e.target.value)} /></div>
               <div><label className="block text-xs text-gray-500 mb-1">N Facture</label><input className="w-full border rounded-lg px-3 py-2 text-sm" value={fNum} onChange={e => setFNum(e.target.value)} placeholder="2026/408" /></div>
@@ -240,22 +234,8 @@ export default function DossierPage() {
               <button onClick={addFacture} disabled={!fNum || !fDate} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1">
                 <Plus className="w-4 h-4" /> Ajouter
               </button>
-              <button onClick={generateVTJC} disabled={generating || !factures.length} className="bg-violet-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1">
-                <Zap className="w-4 h-4" /> {generating ? 'Generation...' : 'Generer VT J.C'}
-              </button>
               {factures.length > 0 && <button onClick={delAllFactures} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1"><Trash2 className="w-4 h-4" /> Supprimer tout</button>}
             </div>
-          </div>
-
-          <div className="bg-white rounded-xl border p-5">
-            <h2 className="font-semibold mb-2">Rapport Vente par jour</h2>
-            <p className="text-xs text-gray-500 mb-3">Upload le PDF "Vente par jour". Ventilation: Espece→411004 / Cheque→411003 / Carte→411005 / Bons→709500.</p>
-            <input ref={rapportRef} type="file" accept=".pdf" className="hidden" onChange={e => handleRapport(e.target.files)} />
-            <div className="flex gap-2">
-              <button onClick={() => rapportRef.current?.click()} className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 flex items-center gap-1.5"><Upload className="w-4 h-4" /> Choisir rapport PDF</button>
-              {rapport.length > 0 && <button onClick={delRapport} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1.5"><Trash2 className="w-4 h-4" /> Supprimer</button>}
-            </div>
-            {rapport.length > 0 && <p className="text-xs text-emerald-600 mt-2">{rapport.length} jour(s) charges</p>}
           </div>
 
           {factures.length > 0 && (
@@ -283,36 +263,81 @@ export default function DossierPage() {
           )}
 
           {vtjcResult && (
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <div className={`${isVTJC ? 'bg-violet-50 border-violet-200' : 'bg-teal-50 border-teal-200'} border rounded-xl p-4`}>
               <div className="flex justify-between items-center mb-2">
-                <h3 className="font-semibold text-blue-800">Resultat Generation VT J.C</h3>
-                <button onClick={() => setVtjcResult(null)} className="text-blue-400 hover:text-blue-600 text-sm">Fermer</button>
+                <h3 className={`font-semibold ${isVTJC ? 'text-violet-800' : 'text-teal-800'}`}>Resultat — {journal}</h3>
+                <button onClick={() => setVtjcResult(null)} className="text-gray-400 hover:text-gray-600 text-sm">Fermer</button>
               </div>
-              <p className="text-sm text-blue-700">{vtjcResult.days} jour(s) traite(s), {vtjcResult.entries?.filter((e: any) => !e.excluded).length || 0} ecriture(s)</p>
-              {vtjcResult.anomalies?.length > 0 && (
-                <div className="mt-3">
-                  <p className="text-sm font-semibold text-red-700 mb-1">Jours excludes (ecart &gt; 3DT) :</p>
-                  {vtjcResult.anomalies.map((a: any, i: number) => (
-                    <div key={i} className="bg-white border border-red-200 rounded-lg p-2 mb-2">
-                      <p className="text-sm font-mono font-bold text-red-700">{a.date} — {a.error}</p>
-                      {a.factures && <pre className="text-xs text-gray-600 mt-1 whitespace-pre-wrap font-mono">{a.factures}</pre>}
+              {isVTJC ? (
+                <>
+                  <p className="text-sm text-violet-700">{vtjcResult.days} jour(s) traite(s), {vtjcResult.entries?.filter((e: any) => !e.excluded).length || 0} ecriture(s)</p>
+                  {vtjcResult.anomalies?.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-sm font-semibold text-red-700 mb-1">Jours excludes (ecart &gt; 3DT) :</p>
+                      {vtjcResult.anomalies.map((a: any, i: number) => (
+                        <div key={i} className="bg-white border border-red-200 rounded-lg p-2 mb-2">
+                          <p className="text-sm font-mono font-bold text-red-700">{a.date} — {a.error}</p>
+                          {a.factures && <pre className="text-xs text-gray-600 mt-1 whitespace-pre-wrap font-mono">{a.factures}</pre>}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-teal-700">{vtjcResult.vtcCount || 0} ecriture(s) extraite(s) du PDF</p>
               )}
             </div>
           )}
         </div>
       )}
 
-      {tab === 'input' && !isVTJC && (
+      {tab === 'rapport' && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border p-5">
-            <h2 className="font-semibold mb-2">Journal VT C — Upload PDF</h2>
-            <p className="text-xs text-gray-500 mb-3">Upload le(s) PDF "Edition facture vente". Le PDF contient deja les ecritures comptables. Extraction automatique.</p>
-            <input ref={vtcFileRef} type="file" accept=".pdf" multiple className="hidden" onChange={handleVTC} />
-            <button onClick={() => vtcFileRef.current?.click()} disabled={vtcLoading} className="bg-teal-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50 flex items-center gap-1.5">
-              {vtcLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} {vtcLoading ? 'Extraction...' : 'Upload PDF VT C'}
+            <h2 className="font-semibold mb-2">Rapport Vente par jour</h2>
+            <p className="text-xs text-gray-500 mb-3">Upload le PDF "Vente par jour". Ventilation: Espece→411004 / Cheque→411003 / Carte→411005 / Bons→709500.</p>
+            <input ref={rapportRef} type="file" accept=".pdf" className="hidden" onChange={e => handleRapport(e.target.files)} />
+            <div className="flex gap-2">
+              <button onClick={() => rapportRef.current?.click()} className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 flex items-center gap-1.5"><Upload className="w-4 h-4" /> Choisir rapport PDF</button>
+              {rapport.length > 0 && <button onClick={delRapport} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1.5"><Trash2 className="w-4 h-4" /> Supprimer</button>}
+            </div>
+            {rapport.length > 0 && <p className="text-xs text-emerald-600 mt-2">{rapport.length} jour(s) charges</p>}
+          </div>
+          {rapport.length > 0 && (
+            <div className="bg-white rounded-xl border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
+                  <th className="px-3 py-2">Date</th><th className="px-3 py-2 text-right">Espece</th><th className="px-3 py-2 text-right">Cheque</th><th className="px-3 py-2 text-right">Carte</th><th className="px-3 py-2 text-right">Bons+Avoir</th><th className="px-3 py-2 text-right">Credit</th>
+                </tr></thead>
+                <tbody className="divide-y divide-gray-100">{rapport.map((r: any) => (
+                  <tr key={r.date_jour} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 font-mono text-xs">{r.date_jour}</td>
+                    <td className="px-3 py-2 text-right font-mono">{r.especes.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{r.cheques.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{r.tpe.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{((r.bonsAchat||0)+(r.avoir||0)).toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{(r.credit||0).toFixed(2)}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+          <div className="bg-white rounded-xl border p-5">
+            <h2 className="font-semibold mb-3">{isVTJC ? 'Generer les ecritures VT J.C' : 'Generer les ecritures VT C'}</h2>
+            {isVTC && (
+              <div className="mb-3">
+                <p className="text-xs text-gray-500 mb-2">Uploadez le(s) PDF "Edition facture vente" :</p>
+                <input ref={vtcFileRef} type="file" accept=".pdf" multiple className="hidden" />
+              </div>
+            )}
+            <p className="text-xs text-gray-500 mb-3">
+              {isVTJC
+                ? 'Calcule les ecritures a partir des factures + rapport.'
+                : 'Extrait les ecritures directement du PDF (comptes 707100/707119).'}
+            </p>
+            <button onClick={generate} disabled={generating || !factures.length} className={`${isVTJC ? 'bg-violet-600 hover:bg-violet-700' : 'bg-teal-600 hover:bg-teal-700'} text-white px-5 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50 flex items-center gap-1.5`}>
+              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : isVTJC ? <Zap className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+              {generating ? 'Generation...' : isVTJC ? 'Generer VT J.C' : 'Generer VT C'}
             </button>
           </div>
         </div>
@@ -345,7 +370,7 @@ export default function DossierPage() {
             </div>
           ) : (
             <div className="bg-white rounded-xl border p-8 text-center text-gray-400 text-sm">
-              {isVTJC ? 'Aucune ecriture VT J.C. Ajoutez des factures puis cliquez "Generer VT J.C".' : 'Aucune ecriture VT C. Uploadez le(s) PDF.'}
+              Aucune ecriture {journal}. Ajoutez des factures, uploadez le rapport puis cliquez "Generer".
             </div>
           )}
           {ecrituresFiltered.length > 0 && (
@@ -358,7 +383,7 @@ export default function DossierPage() {
         </div>
       )}
 
-      {tab === 'analyse' && isVTJC && (
+      {tab === 'analyse' && (
         <div className="space-y-4">
           {analyseLoading ? (
             <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
@@ -368,7 +393,7 @@ export default function DossierPage() {
             <>
               <div className="bg-white rounded-xl border p-5">
                 <h2 className="font-semibold mb-2 flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-amber-500" /> Analyse des ecarts par jour</h2>
-                <p className="text-xs text-gray-500">Comparaison Rapport vs Factures — jours avec ecart &gt; 3DT = exclus</p>
+                <p className="text-xs text-gray-500">Comparaison Rapport vs Factures — jours avec ecart &gt; 3DT = excludes</p>
               </div>
               {analyse.filter(a => Math.abs(a.ecart) > 3).length > 0 && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4">
