@@ -366,47 +366,41 @@ app.get('/api/dossiers/:did/pieces', (req, res) => {
 });
 
 // --- PROCESS VT C PDF (ecritures directes) ---
-const DEBIT_ACCOUNTS = new Set(['411004', '411003', '411005', '709500']);
-const CREDIT_ACCOUNTS = new Set(['707100', '707119', '707109', '707129', '436710', '437500', '436610', '436609']);
-const ECART_ACCOUNT = '634500';
+const DEBIT_ACCOUNTS_VTC = new Set(['411004', '411003', '411005', '709500']);
+const CREDIT_ACCOUNTS_VTC = new Set(['707100', '707119', '436710', '437500']);
+const ECART_ACCOUNT_VTC = '634500';
 
 function parseVTCLines(text) {
   const entries = [];
-  const allAccounts = new Set([...DEBIT_ACCOUNTS, ...CREDIT_ACCOUNTS, ECART_ACCOUNT]);
+  const allAccounts = [...DEBIT_ACCOUNTS_VTC, ...CREDIT_ACCOUNTS_VTC, ECART_ACCOUNT_VTC];
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
-  let currentDate = null;
-  let currentFacNum = null;
-
   for (const line of lines) {
-    const dateMatch = line.match(/(\d{2}[\/.]\d{2}[\/.]\d{4})/);
-    if (dateMatch) {
-      const d = dateMatch[1].replace(/[.\/](\d{2})[\/.](\d{4})/, '-$1-$2').replace(/(\d{2})[\/.-](\d{2})[\/.-](\d{4})/, '$3-$2-$1');
-      currentDate = d.replace(/\//g, '-');
-    }
+    if (line.includes('Total écritures') || line.includes('Journal') || line.includes('Du 01/') || line.includes('ANIMAL CITY') || line.includes('RESD HORIZON') || /^\d+ \/9/.test(line) || /^\d{2}\/\d{2}\/\d{4}\s+\d{2}\.\d{2}\.\d{2}$/.test(line)) continue;
 
-    const facMatch = line.match(/FAC\s*(?:N[°o]?\s*)?(\d+\/\d+)/i);
-    if (facMatch) currentFacNum = facMatch[1];
+    const dateMatch = line.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (!dateMatch) continue;
+    const date = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+
+    const facMatch = line.match(/FAC\s*(?:N[°o]?\s*)?(\d+[-\/]\d+)/i);
+    const facNum = facMatch ? facMatch[1].replace('-', '/') : null;
 
     for (const acct of allAccounts) {
-      const acctRegex = new RegExp('\\b' + acct + '\\b\\s+([\\d\\s]+[,\\.]\\d{2,3})');
+      const acctRegex = new RegExp(acct + '\\s*([\\d][\\d\\s]*[,\\.]\\d{3})');
       const acctMatch = line.match(acctRegex);
       if (acctMatch) {
         const montant = parseFloat(acctMatch[1].replace(/\s/g, '').replace(',', '.'));
         if (isNaN(montant) || montant === 0) continue;
 
         let libelle = '';
-        const libIdx = lines.indexOf(line);
-        if (libIdx >= 0 && libIdx + 1 < lines.length) {
-          const next = lines[libIdx + 1];
-          if (!next.match(/\d{2}[\/.]\d{2}[\/.]\d{4}/) && !next.match(/\d{6}/)) {
-            libelle = next.replace(/FAC\s*(?:N[°o]?\s*)?\d+\/\d+/gi, '').trim();
-          }
+        const afterAmount = line.substring(line.indexOf(acctMatch[0]) + acctMatch[0].length).trim();
+        if (afterAmount) {
+          libelle = afterAmount.replace(/FAC\s*(?:N[°o]?\s*)?\d+[-\/]\d+/gi, '').trim();
         }
 
         entries.push({
-          date: currentDate,
-          facNum: currentFacNum ? 'FAC ' + currentFacNum : null,
+          date,
+          facNum: facNum ? 'FAC ' + facNum : null,
           compte: acct,
           montant,
           libelle: libelle || 'CLIENTS PASSAGERS',
@@ -415,16 +409,16 @@ function parseVTCLines(text) {
     }
   }
 
-  const debits = entries.filter(e => DEBIT_ACCOUNTS.has(e.compte));
-  const credits = entries.filter(e => CREDIT_ACCOUNTS.has(e.compte));
+  const debits = entries.filter(e => DEBIT_ACCOUNTS_VTC.has(e.compte));
+  const credits = entries.filter(e => CREDIT_ACCOUNTS_VTC.has(e.compte));
   const totalD = debits.reduce((s, e) => s + e.montant, 0);
   const totalC = credits.reduce((s, e) => s + e.montant, 0);
 
   for (const e of entries) {
-    if (e.compte === ECART_ACCOUNT) {
+    if (e.compte === ECART_ACCOUNT_VTC) {
       e.sens = totalD > totalC ? 'C' : 'D';
     } else {
-      e.sens = DEBIT_ACCOUNTS.has(e.compte) ? 'D' : 'C';
+      e.sens = DEBIT_ACCOUNTS_VTC.has(e.compte) ? 'D' : 'C';
     }
   }
 
