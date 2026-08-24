@@ -367,8 +367,69 @@ app.get('/api/dossiers/:did/pieces', (req, res) => {
 
 // --- PROCESS VT C PDF (ecritures directes) ---
 const DEBIT_ACCOUNTS = new Set(['411004', '411003', '411005', '709500']);
-const CREDIT_ACCOUNTS = new Set(['707100', '707119', '436710', '437500', '436610']);
+const CREDIT_ACCOUNTS = new Set(['707100', '707119', '707109', '707129', '436710', '437500', '436610', '436609']);
 const ECART_ACCOUNT = '634500';
+
+function parseVTCLines(text) {
+  const entries = [];
+  const allAccounts = new Set([...DEBIT_ACCOUNTS, ...CREDIT_ACCOUNTS, ECART_ACCOUNT]);
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  let currentDate = null;
+  let currentFacNum = null;
+
+  for (const line of lines) {
+    const dateMatch = line.match(/(\d{2}[\/.]\d{2}[\/.]\d{4})/);
+    if (dateMatch) {
+      const d = dateMatch[1].replace(/[.\/](\d{2})[\/.](\d{4})/, '-$1-$2').replace(/(\d{2})[\/.-](\d{2})[\/.-](\d{4})/, '$3-$2-$1');
+      currentDate = d.replace(/\//g, '-');
+    }
+
+    const facMatch = line.match(/FAC\s*(?:N[°o]?\s*)?(\d+\/\d+)/i);
+    if (facMatch) currentFacNum = facMatch[1];
+
+    for (const acct of allAccounts) {
+      const acctRegex = new RegExp('\\b' + acct + '\\b\\s+([\\d\\s]+[,\\.]\\d{2,3})');
+      const acctMatch = line.match(acctRegex);
+      if (acctMatch) {
+        const montant = parseFloat(acctMatch[1].replace(/\s/g, '').replace(',', '.'));
+        if (isNaN(montant) || montant === 0) continue;
+
+        let libelle = '';
+        const libIdx = lines.indexOf(line);
+        if (libIdx >= 0 && libIdx + 1 < lines.length) {
+          const next = lines[libIdx + 1];
+          if (!next.match(/\d{2}[\/.]\d{2}[\/.]\d{4}/) && !next.match(/\d{6}/)) {
+            libelle = next.replace(/FAC\s*(?:N[°o]?\s*)?\d+\/\d+/gi, '').trim();
+          }
+        }
+
+        entries.push({
+          date: currentDate,
+          facNum: currentFacNum ? 'FAC ' + currentFacNum : null,
+          compte: acct,
+          montant,
+          libelle: libelle || 'CLIENTS PASSAGERS',
+        });
+      }
+    }
+  }
+
+  const debits = entries.filter(e => DEBIT_ACCOUNTS.has(e.compte));
+  const credits = entries.filter(e => CREDIT_ACCOUNTS.has(e.compte));
+  const totalD = debits.reduce((s, e) => s + e.montant, 0);
+  const totalC = credits.reduce((s, e) => s + e.montant, 0);
+
+  for (const e of entries) {
+    if (e.compte === ECART_ACCOUNT) {
+      e.sens = totalD > totalC ? 'C' : 'D';
+    } else {
+      e.sens = DEBIT_ACCOUNTS.has(e.compte) ? 'D' : 'C';
+    }
+  }
+
+  return entries;
+}
 
 app.post('/api/dossiers/:did/process-vtc', upload.array('files', 50), async (req, res) => {
   try {
@@ -386,48 +447,13 @@ app.post('/api/dossiers/:did/process-vtc', upload.array('files', 50), async (req
     for (const f of req.files) {
       try {
         const text = await extractTextFromPDF(f.path);
-        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        const entries = parseVTCLines(text);
 
-        let count = 0;
-        let i = 0;
-        while (i < lines.length) {
-          const line = lines[i];
-          const m = line.match(/(\d{2}\/\d{2}\/\d{4})\s+FAC\s+(?:N°)?(\d+\/\d+)\s+(\d{6})\s+([\d\s]+,\d{3})/);
-          if (m) {
-            const date = m[1].replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1');
-            const facNum = 'FAC ' + m[2] + '/26';
-            const compte = m[3];
-            const montant = parseFloat(m[4].replace(/\s/g, '').replace(',', '.'));
-            let libelle = 'CLIENTS PASSAGERS';
-            if (i + 1 < lines.length && !lines[i + 1].match(/\d{2}\/\d{2}\/\d{4}/)) {
-              libelle = lines[i + 1].replace(/FAC\s+(?:N°)?\d+\/\d+\s*/, '').trim() || libelle;
-            }
-
-            let sens;
-            if (compte === ECART_ACCOUNT) {
-              const dayEntries = [];
-              let j = i - 1;
-              while (j >= 0 && lines[j].match(/\d{2}\/\d{2}\/\d{4}/)) {
-                const prev = lines[j].match(/(\d{6})\s+([\d\s]+,\d{3})/);
-                if (prev) dayEntries.push({ compte: prev[1], montant: parseFloat(prev[2].replace(/\s/g, '').replace(',', '.')) });
-                j--;
-              }
-              const totalD = dayEntries.filter(e => DEBIT_ACCOUNTS.has(e.compte)).reduce((s, e) => s + e.montant, 0);
-              const totalC = dayEntries.filter(e => CREDIT_ACCOUNTS.has(e.compte)).reduce((s, e) => s + e.montant, 0);
-              sens = totalD > totalC ? 'C' : 'D';
-            } else {
-              sens = DEBIT_ACCOUNTS.has(compte) ? 'D' : 'C';
-            }
-
-            insertE.run(genId(), did, d.societe_id, 'VT C', date, date, facNum, libelle, compte, sens, montant, null);
-            count++;
-            i += 2;
-          } else {
-            i++;
-          }
+        for (const e of entries) {
+          insertE.run(genId(), did, d.societe_id, 'VT C', e.date, e.date, e.facNum || f.originalname, e.libelle, e.compte, e.sens, e.montant, null);
         }
-        totalEntries += count;
-        results.push({ file: f.originalname, entries: count, ok: true });
+        totalEntries += entries.length;
+        results.push({ file: f.originalname, entries: entries.length, ok: true });
       } catch (e) {
         results.push({ file: f.originalname, error: e.message, ok: false });
       } finally {

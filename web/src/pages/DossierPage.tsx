@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Upload, Plus, Trash2, Download, ArrowLeft, FileText, Zap, Loader2, AlertTriangle, FileSpreadsheet } from 'lucide-react';
+import { Upload, Plus, Trash2, Download, ArrowLeft, FileText, Zap, Loader2, AlertTriangle, FileSpreadsheet, CheckCircle, XCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { api } from '../lib/api';
 
@@ -10,7 +10,8 @@ export default function DossierPage() {
   const [pieces, setPieces] = useState<any[]>([]);
   const [ecritures, setEcritures] = useState<any[]>([]);
   const [factures, setFactures] = useState<any[]>([]);
-  const [tab, setTab] = useState<'factures' | 'ecritures' | 'pieces' | 'rapport' | 'analyse' | 'vtc'>('factures');
+  const [tab, setTab] = useState<'factures' | 'ecritures' | 'rapport' | 'analyse'>('factures');
+  const [ecritureSubTab, setEcritureSubTab] = useState<'vtjc' | 'vtc'>('vtjc');
   const [rapport, setRapport] = useState<any[]>([]);
   const [analyse, setAnalyse] = useState<any[]>([]);
   const [analyseLoading, setAnalyseLoading] = useState(false);
@@ -26,7 +27,6 @@ export default function DossierPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
 
-  // Form facture
   const [fDate, setFDate] = useState(new Date().toISOString().split('T')[0]);
   const [fNum, setFNum] = useState('');
   const [fClient, setFClient] = useState('');
@@ -71,10 +71,7 @@ export default function DossierPage() {
     reload();
   };
 
-  const delFacture = async (fid: string) => {
-    await api.deleteFacture(fid);
-    reload();
-  };
+  const delFacture = async (fid: string) => { await api.deleteFacture(fid); reload(); };
   const delAllFactures = async () => {
     if (!id || !confirm('Supprimer TOUT : factures + écritures VT J.C + rapport ?')) return;
     await api.deleteAllFactures(id);
@@ -95,6 +92,7 @@ export default function DossierPage() {
   };
 
   const delEcriture = async (eid: string) => { await api.deleteEcriture(eid); reload(); };
+
   const handleRapport = async (files: FileList | null) => {
     if (!files?.[0] || !id) return;
     try { const r = await api.uploadRapport(id, files[0]); alert('Rapport importé: ' + r.count + ' jour(s)'); reload(); } catch (e: any) { alert('Erreur rapport: ' + e.message); }
@@ -167,6 +165,16 @@ export default function DossierPage() {
 
   if (loading) return <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
 
+  const ecrituresVTJC = ecritures.filter(e => e.journal_code === 'VT J.C');
+  const ecrituresVTC = ecritures.filter(e => e.journal_code === 'VT C');
+
+  const TABS: Array<{ key: typeof tab; label: string; count?: number; icon?: React.ReactNode }> = [
+    { key: 'factures', label: 'Factures', count: factures.length },
+    { key: 'rapport', label: 'Rapport', count: rapport.length },
+    { key: 'ecritures', label: 'Ecritures', count: ecritures.length },
+    { key: 'analyse', label: 'Analyse', icon: <AlertTriangle className="w-3 h-3 inline mr-1" /> },
+  ];
+
   return (
     <div className="space-y-6">
       <div>
@@ -174,7 +182,7 @@ export default function DossierPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold">{dossier?.nom}</h1>
-            <p className="text-sm text-gray-500">{factures.length} facture(s) | {ecritures.length} ecriture(s) | {pieces.length} piece(s)</p>
+            <p className="text-sm text-gray-500">{factures.length} facture(s) | {ecrituresVTJC.length} VT J.C | {ecrituresVTC.length} VT C | {rapport.length} rapport(s)</p>
           </div>
           <div className="flex gap-2">
             <button onClick={exportCSV} disabled={!ecritures.length} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
@@ -188,14 +196,13 @@ export default function DossierPage() {
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        {(['factures', 'ecritures', 'pieces', 'rapport', 'analyse', 'vtc'] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-lg text-sm font-medium capitalize ${tab === t ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-            {t === 'analyse' ? <><AlertTriangle className="w-3 h-3 inline mr-1" />Analyse</> : t === 'vtc' ? 'VT C' : t} {t === 'factures' ? `(${factures.length})` : t === 'ecritures' ? `(${ecritures.length})` : t === 'pieces' ? `(${pieces.length})` : t === 'rapport' ? `(${rapport.length})` : ''}
+        {TABS.map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === t.key ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+            {t.icon}{t.label}{t.count !== undefined ? ` (${t.count})` : ''}
           </button>
         ))}
       </div>
 
-      {/* FACTURES */}
       {tab === 'factures' && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border p-5">
@@ -203,7 +210,7 @@ export default function DossierPage() {
             <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
               <div><label className="block text-xs text-gray-500 mb-1">Date</label><input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={fDate} onChange={e => setFDate(e.target.value)} /></div>
               <div><label className="block text-xs text-gray-500 mb-1">N Facture</label><input className="w-full border rounded-lg px-3 py-2 text-sm" value={fNum} onChange={e => setFNum(e.target.value)} placeholder="2026/408" /></div>
-              <div><label className="block text-xs text-gray-500 mb-1">Client (optionnel)</label><input className="w-full border rounded-lg px-3 py-2 text-sm" value={fClient} onChange={e => setFClient(e.target.value)} placeholder="HBMI CONSULTING" /></div>
+              <div><label className="block text-xs text-gray-500 mb-1">Client</label><input className="w-full border rounded-lg px-3 py-2 text-sm" value={fClient} onChange={e => setFClient(e.target.value)} placeholder="HBMI CONSULTING" /></div>
               <div><label className="block text-xs text-gray-500 mb-1">HT 0%</label><input type="number" step="0.001" className="w-full border rounded-lg px-3 py-2 text-sm" value={fHt0} onChange={e => setFHt0(e.target.value)} placeholder="0.000" /></div>
               <div><label className="block text-xs text-gray-500 mb-1">HT 19%</label><input type="number" step="0.001" className="w-full border rounded-lg px-3 py-2 text-sm" value={fHt19} onChange={e => setFHt19(e.target.value)} placeholder="0.000" /></div>
               <div><label className="block text-xs text-gray-500 mb-1">TVA 19%</label><input type="number" step="0.001" className="w-full border rounded-lg px-3 py-2 text-sm" value={fTva} onChange={e => setFTva(e.target.value)} placeholder="0.000" /></div>
@@ -253,7 +260,7 @@ export default function DossierPage() {
               <p className="text-sm text-blue-700">{vtjcResult.days} jour(s) traite(s), {vtjcResult.entries?.filter((e: any) => !e.excluded).length || 0} ecriture(s)</p>
               {vtjcResult.anomalies?.length > 0 && (
                 <div className="mt-3">
-                  <p className="text-sm font-semibold text-red-700 mb-1">Jours exclus (ecart {">"} 3DT) :</p>
+                  <p className="text-sm font-semibold text-red-700 mb-1">Jours excludes (ecart &gt; 3DT) :</p>
                   {vtjcResult.anomalies.map((a: any, i: number) => (
                     <div key={i} className="bg-white border border-red-200 rounded-lg p-2 mb-2">
                       <p className="text-sm font-mono font-bold text-red-700">{a.date} — {a.error}</p>
@@ -261,77 +268,183 @@ export default function DossierPage() {
                     </div>
                   ))}
                 </div>
+              )}
+            </div>
           )}
         </div>
       )}
 
-      {/* VT C */}
-      {(tab as string) === 'vtc' && (
+      {tab === 'rapport' && (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border p-5">
-            <h2 className="font-semibold mb-2">Journal VT C — Ecritures directes</h2>
-            <p className="text-xs text-gray-500 mb-3">Upload le PDF "Edition facture vente" du journal VT C. Le PDF contient déjà les écritures comptables (411004, 707100, 436710, etc.). Extraction automatique.</p>
-            <input ref={vtcFileRef} type="file" accept=".pdf" multiple className="hidden" onChange={handleVTC} />
+            <h2 className="font-semibold mb-2">Rapport Vente par jour</h2>
+            <p className="text-xs text-gray-500 mb-3">Upload le PDF "Vente par jour" — cas separe des factures. Ventilation: Espece→411004 / Cheque→411003 / Carte→411005 / Bons→709500.</p>
+            <input ref={rapportRef} type="file" accept=".pdf" className="hidden" onChange={e => handleRapport(e.target.files)} />
             <div className="flex gap-2">
-              <button onClick={() => vtcFileRef.current?.click()} disabled={vtcLoading} className="bg-teal-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50 flex items-center gap-1.5">
-                {vtcLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} {vtcLoading ? 'Extraction...' : 'Upload PDF VT C'}
-              </button>
-              {ecritures.filter(e => e.journal_code === 'VT C').length > 0 && (
-                <button onClick={async () => { if (!id || !confirm('Supprimer toutes les écritures VT C?')) return; await api.deleteAllEcritures(id); reload(); }} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1">
-                  <Trash2 className="w-4 h-4" /> Supprimer VT C
-                </button>
-              )}
+              <button onClick={() => rapportRef.current?.click()} className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 flex items-center gap-1.5"><Upload className="w-4 h-4" /> Choisir rapport PDF</button>
+              {rapport.length > 0 && <button onClick={delRapport} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1.5"><Trash2 className="w-4 h-4" /> Supprimer</button>}
             </div>
-            {vtcLoading && <p className="text-xs text-blue-600 mt-2">Extraction en cours...</p>}
+            {rapport.length > 0 && <p className="text-xs text-emerald-600 mt-2">{rapport.length} jour(s) charges — Generer VT J.C utilisera ce rapport</p>}
+            {rapport.length === 0 && <p className="text-xs text-gray-400 mt-2">Aucun rapport — generation utilisera le fallback par defaut</p>}
           </div>
-          {ecritures.filter(e => e.journal_code === 'VT C').length > 0 && (
+          {rapport.length > 0 && (
             <div className="bg-white rounded-xl border overflow-hidden">
               <table className="w-full text-sm">
                 <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
-                  <th className="px-3 py-2">Date</th><th className="px-3 py-2">N Doc</th><th className="px-3 py-2">Libellé</th><th className="px-3 py-2">Compte</th><th className="px-3 py-2">Sens</th><th className="px-3 py-2 text-right">Montant</th>
+                  <th className="px-3 py-2">Date</th><th className="px-3 py-2 text-right">Espece</th><th className="px-3 py-2 text-right">Cheque</th><th className="px-3 py-2 text-right">Carte</th><th className="px-3 py-2 text-right">Bons+Avoir</th><th className="px-3 py-2 text-right">Credit</th>
                 </tr></thead>
-                <tbody className="divide-y divide-gray-100">
-                  {ecritures.filter(e => e.journal_code === 'VT C').map(e => (
-                    <tr key={e.id} className="hover:bg-gray-50">
-                      <td className="px-3 py-2">{e.date_operation}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{e.numero_doc || '-'}</td>
-                      <td className="px-3 py-2">{e.libelle}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{e.compte}</td>
-                      <td className="px-3 py-2"><span className={e.sens === 'D' ? 'text-emerald-600 font-bold' : 'text-blue-600 font-bold'}>{e.sens}</span></td>
-                      <td className="px-3 py-2 text-right font-mono">{(e.montant || 0).toFixed(3)}</td>
-                    </tr>
-                  ))}
-                </tbody>
+                <tbody className="divide-y divide-gray-100">{rapport.map((r: any) => (
+                  <tr key={r.date_jour} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 font-mono text-xs">{r.date_jour}</td>
+                    <td className="px-3 py-2 text-right font-mono">{r.especes.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{r.cheques.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{r.tpe.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{((r.bonsAchat||0)+(r.avoir||0)).toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{(r.credit||0).toFixed(2)}</td>
+                  </tr>
+                ))}</tbody>
               </table>
             </div>
           )}
         </div>
       )}
+
+      {tab === 'ecritures' && (
+        <div className="space-y-4">
+          <div className="flex gap-2">
+            <button onClick={() => setEcritureSubTab('vtjc')} className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-all ${ecritureSubTab === 'vtjc' ? 'bg-violet-100 text-violet-700 border-2 border-violet-300' : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-gray-200'}`}>
+              <Zap className="w-4 h-4 inline mr-1" /> VT J.C <span className="ml-1 text-xs opacity-70">({ecrituresVTJC.length})</span>
+            </button>
+            <button onClick={() => setEcritureSubTab('vtc')} className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-all ${ecritureSubTab === 'vtc' ? 'bg-teal-100 text-teal-700 border-2 border-teal-300' : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-gray-200'}`}>
+              <FileText className="w-4 h-4 inline mr-1" /> VT C <span className="ml-1 text-xs opacity-70">({ecrituresVTC.length})</span>
+            </button>
+          </div>
+
+          {ecritureSubTab === 'vtjc' && (
+            <div className="space-y-3">
+              <div className="bg-white rounded-xl border p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-violet-700">Journal VT J.C — Ecritures generees</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Calculees a partir des factures + rapport (modes de paiement)</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={generateVTJC} disabled={generating || !factures.length} className="bg-violet-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1">
+                      <Zap className="w-4 h-4" /> {generating ? 'Generation...' : 'Regenerer'}
+                    </button>
+                    {ecrituresVTJC.length > 0 && (
+                      <button onClick={async () => { if (!id || !confirm('Supprimer ecritures VT J.C?')) return; await api.deleteAllEcritures(id); reload(); }} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1">
+                        <Trash2 className="w-4 h-4" /> Supprimer
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {ecrituresVTJC.length > 0 ? (
+                <div className="bg-white rounded-xl border overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
+                        <th className="px-4 py-3">Date</th><th className="px-4 py-3">N Doc</th><th className="px-4 py-3">Libelle</th><th className="px-4 py-3">Compte</th><th className="px-4 py-3">Sens</th><th className="px-4 py-3 text-right">Montant</th><th className="px-4 py-3"></th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {ecrituresVTJC.map(e => (
+                          <tr key={e.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-2">{e.date_operation}</td>
+                            <td className="px-4 py-2 font-mono text-xs">{e.numero_doc || '-'}</td>
+                            <td className="px-4 py-2">{e.libelle}</td>
+                            <td className="px-4 py-2 font-mono text-xs">{e.compte}</td>
+                            <td className="px-4 py-2"><span className={e.sens === 'D' ? 'text-emerald-600 font-bold' : 'text-blue-600 font-bold'}>{e.sens}</span></td>
+                            <td className="px-4 py-2 text-right font-mono">{(e.montant || 0).toFixed(3)}</td>
+                            <td className="px-4 py-2"><button onClick={() => delEcriture(e.id)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-white rounded-xl border p-8 text-center text-gray-400 text-sm">
+                  Aucune ecriture VT J.C. Saisissez les factures puis cliquez "Generer VT J.C".
+                </div>
+              )}
+            </div>
+          )}
+
+          {ecritureSubTab === 'vtc' && (
+            <div className="space-y-3">
+              <div className="bg-white rounded-xl border p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-teal-700">Journal VT C — Ecritures directes</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Extraction du PDF "Edition facture vente" — les ecritures sont deja dans le PDF</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <input ref={vtcFileRef} type="file" accept=".pdf" multiple className="hidden" onChange={handleVTC} />
+                    <button onClick={() => vtcFileRef.current?.click()} disabled={vtcLoading} className="bg-teal-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50 flex items-center gap-1.5">
+                      {vtcLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} {vtcLoading ? 'Extraction...' : 'Upload PDF VT C'}
+                    </button>
+                    {ecrituresVTC.length > 0 && (
+                      <button onClick={async () => { if (!id || !confirm('Supprimer toutes les ecritures VT C?')) return; await api.deleteAllEcritures(id); reload(); }} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1">
+                        <Trash2 className="w-4 h-4" /> Supprimer
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {ecrituresVTC.length > 0 ? (
+                <div className="bg-white rounded-xl border overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
+                        <th className="px-4 py-3">Date</th><th className="px-4 py-3">N Doc</th><th className="px-4 py-3">Libelle</th><th className="px-4 py-3">Compte</th><th className="px-4 py-3">Sens</th><th className="px-4 py-3 text-right">Montant</th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {ecrituresVTC.map(e => (
+                          <tr key={e.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-2">{e.date_operation}</td>
+                            <td className="px-4 py-2 font-mono text-xs">{e.numero_doc || '-'}</td>
+                            <td className="px-4 py-2">{e.libelle}</td>
+                            <td className="px-4 py-2 font-mono text-xs">{e.compte}</td>
+                            <td className="px-4 py-2"><span className={e.sens === 'D' ? 'text-emerald-600 font-bold' : 'text-blue-600 font-bold'}>{e.sens}</span></td>
+                            <td className="px-4 py-2 text-right font-mono">{(e.montant || 0).toFixed(3)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-white rounded-xl border p-8 text-center text-gray-400 text-sm">
+                  Aucune ecriture VT C. Uploadez le PDF "Edition facture vente" pour extraire les ecritures.
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
-      {/* ANALYSE */}
       {tab === 'analyse' && (
         <div className="space-y-4">
           {analyseLoading ? (
             <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
           ) : analyse.length === 0 ? (
-            <p className="text-center text-gray-400 py-8">Aucune donnée. Ajoutez des factures d'abord.</p>
+            <p className="text-center text-gray-400 py-8">Aucune donnee. Ajoutez des factures d'abord.</p>
           ) : (
             <>
               <div className="bg-white rounded-xl border p-5">
-                <h2 className="font-semibold mb-2 flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-amber-500" /> Analyse des écarts par jour</h2>
-                <p className="text-xs text-gray-500">Comparaison Rapport vs Factures — jours avec écart &gt; 3DT = exclus de la génération VT J.C</p>
+                <h2 className="font-semibold mb-2 flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-amber-500" /> Analyse des ecarts par jour</h2>
+                <p className="text-xs text-gray-500">Comparaison Rapport vs Factures — jours avec ecart &gt; 3DT = exclus de la generation VT J.C</p>
               </div>
               {analyse.filter(a => Math.abs(a.ecart) > 3).length > 0 && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                  <h3 className="font-semibold text-red-700 text-sm mb-2">Jours exclus (écart &gt; 3DT) — à vérifier manuellement :</h3>
+                  <h3 className="font-semibold text-red-700 text-sm mb-2">Jours excludes (ecart &gt; 3DT) — a verifier manuellement :</h3>
                   {analyse.filter(a => Math.abs(a.ecart) > 3).map((a: any) => (
                     <details key={a.date} className="mb-3 bg-white border border-red-200 rounded-lg overflow-hidden">
                       <summary className="px-4 py-3 cursor-pointer hover:bg-red-50 flex items-center justify-between">
                         <span className="font-mono font-bold text-red-700">{a.date}</span>
                         <span className="text-sm">
-                          <span className="text-red-600 font-mono font-bold">écart = {a.ecart.toFixed(3)} DT</span>
+                          <span className="text-red-600 font-mono font-bold">ecart = {a.ecart.toFixed(3)} DT</span>
                           <span className="text-gray-400 ml-2">| {a.nbFactures} facture(s)</span>
                           <span className="text-gray-400 ml-2">| Factures: {a.totalFactures.toFixed(2)} | Rapport: {a.totalModes.toFixed(2)}</span>
                         </span>
@@ -340,12 +453,12 @@ export default function DossierPage() {
                         <div>
                           <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Modes de paiement (Rapport) :</h4>
                           <div className="grid grid-cols-3 gap-1 text-xs font-mono">
-                            <span>Espèce: {a.modes.especes.toFixed(2)}</span>
-                            <span>Chèque: {a.modes.cheques.toFixed(2)}</span>
+                            <span>Espece: {a.modes.especes.toFixed(2)}</span>
+                            <span>Cheque: {a.modes.cheques.toFixed(2)}</span>
                             <span>Carte: {a.modes.tpe.toFixed(2)}</span>
                             <span>Bons: {a.modes.bonsAchat.toFixed(2)}</span>
                             <span>Avoir: {a.modes.avoir.toFixed(2)}</span>
-                            <span>Crédit: {a.modes.credit.toFixed(2)}</span>
+                            <span>Credit: {a.modes.credit.toFixed(2)}</span>
                           </div>
                         </div>
                         <div>
@@ -357,9 +470,9 @@ export default function DossierPage() {
                         </div>
                         {a.proposedEcritures.length > 0 && (
                           <div>
-                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Écritures proposées (non générées) :</h4>
+                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Ecritures proposees (non generees) :</h4>
                             <table className="w-full text-xs">
-                              <thead><tr className="text-gray-400"><th className="text-left">Compte</th><th className="text-left">Sens</th><th className="text-right">Montant</th><th className="text-left">Libellé</th></tr></thead>
+                              <thead><tr className="text-gray-400"><th className="text-left">Compte</th><th className="text-left">Sens</th><th className="text-right">Montant</th><th className="text-left">Libelle</th></tr></thead>
                               <tbody className="divide-y divide-gray-100">{a.proposedEcritures.map((l: any, i: number) => <tr key={i}><td className="font-mono">{l.compte}</td><td className={l.sens === 'D' ? 'text-emerald-600 font-bold' : 'text-blue-600 font-bold'}>{l.sens}</td><td className="text-right font-mono">{l.montant.toFixed(3)}</td><td>{l.libelle || '-'}</td></tr>)}</tbody>
                             </table>
                           </div>
@@ -372,7 +485,7 @@ export default function DossierPage() {
               <div className="bg-white rounded-xl border overflow-hidden">
                 <table className="w-full text-sm">
                   <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
-                    <th className="px-3 py-2">Date</th><th className="px-3 py-2 text-right">Factures TTC</th><th className="px-3 py-2 text-right">Rapport Total</th><th className="px-3 py-2 text-right">Écart</th><th className="px-3 py-2 text-center">Statut</th>
+                    <th className="px-3 py-2">Date</th><th className="px-3 py-2 text-right">Factures TTC</th><th className="px-3 py-2 text-right">Rapport Total</th><th className="px-3 py-2 text-right">Ecart</th><th className="px-3 py-2 text-center">Statut</th>
                   </tr></thead>
                   <tbody className="divide-y divide-gray-100">
                     {analyse.map((a: any) => (
@@ -381,110 +494,13 @@ export default function DossierPage() {
                         <td className="px-3 py-2 text-right font-mono">{a.totalFactures.toFixed(2)}</td>
                         <td className="px-3 py-2 text-right font-mono">{a.totalModes.toFixed(2)}</td>
                         <td className={`px-3 py-2 text-right font-mono font-bold ${Math.abs(a.ecart) > 3 ? 'text-red-600' : Math.abs(a.ecart) > 1 ? 'text-amber-600' : 'text-emerald-600'}`}>{a.ecart.toFixed(3)}</td>
-                        <td className="px-3 py-2 text-center">{a.excluded ? <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded">EXCLU</span> : <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-0.5 rounded">OK</span>}</td>
+                        <td className="px-3 py-2 text-center">{a.excluded ? <XCircle className="w-4 h-4 text-red-500 inline" /> : <CheckCircle className="w-4 h-4 text-emerald-500 inline" />}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             </>
-          )}
-        </div>
-      )}
-
-      {/* ECRITURES */}
-      {tab === 'ecritures' && (
-        <div className="space-y-3">
-          {ecritures.length > 0 && (
-            <div className="flex gap-2 justify-end">
-              <button onClick={async () => { if (!id || !confirm('Supprimer toutes les ecritures VT J.C?')) return; await api.deleteAllEcritures(id); reload(); }} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1">
-                <Trash2 className="w-4 h-4" /> Supprimer ecritures VT J.C
-              </button>
-            </div>
-          )}
-          <div className="bg-white rounded-xl border overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
-                <th className="px-4 py-3">Journal</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">N Doc</th><th className="px-4 py-3">Libelle</th><th className="px-4 py-3">Compte</th><th className="px-4 py-3">Sens</th><th className="px-4 py-3 text-right">Montant</th><th className="px-4 py-3"></th>
-              </tr></thead>
-              <tbody className="divide-y divide-gray-100">
-                {ecritures.length === 0 ? (
-                  <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400 text-sm">Aucune ecriture. Saisissez les factures puis cliquez "Generer VT J.C".</td></tr>
-                ) : ecritures.map(e => (
-                  <tr key={e.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2"><span className="bg-violet-100 text-violet-700 text-xs font-bold px-2 py-0.5 rounded">{e.journal_code}</span></td>
-                    <td className="px-4 py-2">{e.date_operation}</td>
-                    <td className="px-4 py-2 font-mono text-xs">{e.numero_doc || '-'}</td>
-                    <td className="px-4 py-2">{e.libelle}</td>
-                    <td className="px-4 py-2 font-mono text-xs">{e.compte || e.compte_debit || e.compte_credit}</td>
-                    <td className="px-4 py-2 font-mono text-xs"><span className={e.sens === 'D' ? 'text-emerald-600 font-bold' : 'text-blue-600 font-bold'}>{e.sens || (e.compte_debit ? 'D' : 'C')}</span></td>
-                    <td className="px-4 py-2 text-right font-mono">{(e.montant || 0).toFixed(3)}</td>
-                    <td className="px-4 py-2"><button onClick={() => delEcriture(e.id)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        </div>
-      )}
-
-      {/* PIECES */}
-      {tab === 'pieces' && (
-        <div className="space-y-4">
-          <div className={`bg-white rounded-xl border-2 border-dashed p-8 text-center transition-all cursor-pointer ${dragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400'}`}
-            onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files); }} onClick={() => fileRef.current?.click()}>
-            <input ref={fileRef} type="file" multiple accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => handleUpload(e.target.files)} />
-            {uploading ? <div className="animate-spin w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full mx-auto" /> : <><Upload className="w-10 h-10 mx-auto text-gray-400 mb-3" /><p className="text-sm font-medium text-gray-700">Glissez vos PDF/images ici</p><p className="text-xs text-gray-400 mt-1">PDF, JPG, PNG - Multiple fichiers</p></>}
-          </div>
-          <input ref={dirRef} type="file" className="hidden" /* @ts-ignore */
-            webkitdirectory="" directory="" multiple
-            onChange={e => { if (e.target.files?.length) handleUpload(e.target.files); e.target.value = ''; }} />
-          <div className="flex gap-2">
-            <button onClick={() => fileRef.current?.click()} disabled={uploading}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
-              <Upload className="w-4 h-4" /> Choisir des fichiers
-            </button>
-            <button onClick={() => dirRef.current?.click()} disabled={uploading}
-              className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1.5">
-              <FileText className="w-4 h-4" /> Choisir un dossier
-            </button>
-          </div>
-          <p className="text-xs text-gray-400">"Choisir un dossier" selectionne tous les PDF d'un dossier d'un seul click</p>
-          {pieces.length > 0 && (
-            <div className="bg-white rounded-xl border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase"><th className="px-4 py-3">Fichier</th></tr></thead>
-                <tbody className="divide-y divide-gray-100">
-                  {pieces.map(p => <tr key={p.id} className="hover:bg-gray-50"><td className="px-4 py-2 flex items-center gap-2"><FileText className="w-4 h-4 text-red-500" />{p.nom_fichier}</td></tr>)}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab === 'rapport' && (
-        <div className="space-y-4">
-          <div className="bg-white rounded-xl border p-5">
-            <h2 className="font-semibold mb-2">Rapport Vente par jour</h2>
-            <p className="text-xs text-gray-500 mb-3">Upload le PDF "Vente par jour" (JDC) — cas séparé des factures. Ventilation: Espèce→411004 / Chèque→411003 / Carte→411005 / Bons D'ach→709500. Crédit affiché pour info (déjà dans les factures).</p>
-            <input ref={rapportRef} type="file" accept=".pdf" className="hidden" onChange={e => handleRapport(e.target.files)} />
-            <div className="flex gap-2">
-              <button onClick={() => rapportRef.current?.click()} className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 flex items-center gap-1.5"><Upload className="w-4 h-4" /> Choisir rapport PDF</button>
-              {rapport.length > 0 && <button onClick={delRapport} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1.5"><Trash2 className="w-4 h-4" /> Supprimer</button>}
-            </div>
-            {rapport.length > 0 && <p className="text-xs text-emerald-600 mt-2">{rapport.length} jour(s) chargés — Generer VT J.C utilisera ce rapport</p>}
-            {rapport.length === 0 && <p className="text-xs text-gray-400 mt-2">Aucun rapport — generate utilisera le fallback Juin 2026 par défaut</p>}
-          </div>
-          {rapport.length > 0 && (
-            <div className="bg-white rounded-xl border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase"><th className="px-3 py-2">Date</th><th className="px-3 py-2 text-right">Espèce 411004</th><th className="px-3 py-2 text-right">Chèque 411003</th><th className="px-3 py-2 text-right">Carte 411005</th><th className="px-3 py-2 text-right">Bons D'ach 709500</th><th className="px-3 py-2 text-right">Crédit 411006</th></tr></thead>
-                <tbody className="divide-y divide-gray-100">{rapport.map((r: any) => <tr key={r.date_jour} className="hover:bg-gray-50"><td className="px-3 py-2 font-mono text-xs">{r.date_jour}</td><td className="px-3 py-2 text-right font-mono">{r.especes.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{r.cheques.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{r.tpe.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{((r.bonsAchat||0)+(r.avoir||0)).toFixed(2)}</td><td className="px-3 py-2 text-right font-mono">{(r.credit||0).toFixed(2)}</td></tr>)}</tbody>
-              </table>
-            </div>
           )}
         </div>
       )}
