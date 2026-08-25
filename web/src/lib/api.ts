@@ -58,4 +58,11 @@ export const api = {
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Erreur ${r.status}`);
     return r.json();
   },
+  processFISC: async (did: string, file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch(`${BASE}/dossiers/${did}/process-fisc`, { method: 'POST', body: fd });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Erreur ${r.status}`);
+    return r.json();
+  },
 };

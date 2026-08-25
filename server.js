@@ -121,6 +121,30 @@ async function extractTextFromPDF(filePath) {
   return fullText;
 }
 
+async function extractTextItemsFromPDF(filePath) {
+  if (!pdfjsLib) pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const data = new Uint8Array(fs.readFileSync(filePath));
+  const doc = await pdfjsLib.getDocument({ data }).promise;
+  const allItems = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    for (const item of content.items) {
+      if (item.str.trim()) {
+        allItems.push({
+          str: item.str,
+          x: item.transform[4],
+          y: item.transform[5],
+          page: i,
+        });
+      }
+    }
+  }
+  return allItems;
+}
+
+const { parseDMIItems, generateFISCecritures } = require('./server-fisc');
+
 function parseRapport(text) {
   const modes = {};
   const p = s => parseFloat(s.replace(/ /g, '').replace(',', '.')) || 0;
@@ -229,7 +253,7 @@ const defaultSoc = db.prepare('SELECT id FROM societes LIMIT 1').get();
 if (!defaultSoc) {
   const sid = 'default_soc';
   db.prepare('INSERT INTO societes (id, raison_sociale) VALUES (?, ?)').run(sid, 'Cabinet');
-  const journaux = [['VE','Ventes'],['AC','Achats'],['BQ','Banque'],['CA','Caisse'],['OD','Operations Diverses']];
+  const journaux = [['VE','Ventes'],['AC','Achats'],['BQ','Banque'],['CA','Caisse'],['OD','Operations Diverses'],['FISC','Declarations Fiscales']];
   for (const [c, l] of journaux) db.prepare('INSERT INTO journaux (id, societe_id, code, libelle) VALUES (?, ?, ?, ?)').run(genId(), sid, c, l);
 }
 
@@ -252,6 +276,15 @@ if (!rcols.includes('credit')) {
   db.exec("ALTER TABLE rapport_modes ADD COLUMN credit REAL DEFAULT 0");
 }
 
+// --- MIGRATE journaux: add FISC if missing ---
+const allSocs = db.prepare('SELECT id FROM societes').all();
+for (const soc of allSocs) {
+  const hasFisc = db.prepare('SELECT id FROM journaux WHERE societe_id = ? AND code = ?').get(soc.id, 'FISC');
+  if (!hasFisc) {
+    db.prepare('INSERT INTO journaux (id, societe_id, code, libelle) VALUES (?, ?, ?, ?)').run(genId(), soc.id, 'FISC', 'Declarations Fiscales');
+  }
+}
+
 // --- SOCIETES ---
 app.get('/api/societes', (req, res) => {
   res.json(db.prepare('SELECT * FROM societes ORDER BY raison_sociale').all());
@@ -262,7 +295,7 @@ app.post('/api/societes', (req, res) => {
   if (!raison_sociale) return res.status(400).json({ error: 'Raison sociale requise' });
   const id = genId();
   db.prepare('INSERT INTO societes (id, raison_sociale, matricule_fiscal) VALUES (?, ?, ?)').run(id, raison_sociale, matricule_fiscal || null);
-  const journaux = [['VE','Ventes'],['AC','Achats'],['BQ','Banque'],['CA','Caisse'],['OD','Operations Diverses']];
+  const journaux = [['VE','Ventes'],['AC','Achats'],['BQ','Banque'],['CA','Caisse'],['OD','Operations Diverses'],['FISC','Declarations Fiscales']];
   const stmt = db.prepare('INSERT INTO journaux (id, societe_id, code, libelle) VALUES (?, ?, ?, ?)');
   for (const [c, l] of journaux) stmt.run(genId(), id, c, l);
   res.json({ id, raison_sociale, matricule_fiscal });
@@ -452,6 +485,49 @@ app.post('/api/dossiers/:did/process-vtc', upload.array('files', 50), async (req
     res.json({ processed: results.length, totalEntries, results });
   } catch (e) {
     console.error('Process VT C error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- PROCESS FISC (DMI PDF) ---
+app.post('/api/dossiers/:did/process-fisc', upload.single('file'), async (req, res) => {
+  try {
+    const did = req.params.did;
+    const d = db.prepare('SELECT * FROM dossiers WHERE id = ?').get(did);
+    if (!d) return res.status(404).json({ error: 'Dossier non trouve' });
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier envoye' });
+
+    try {
+      const items = await extractTextItemsFromPDF(req.file.path);
+      const dmi = parseDMIItems(items);
+
+      if (!dmi.mois || !dmi.annee) {
+        return res.status(400).json({ error: 'Mois/annee non trouves dans le PDF', dmi });
+      }
+
+      // Delete existing FISC ecritures
+      db.prepare("DELETE FROM ecritures WHERE dossier_id = ? AND journal_code = 'FISC'").run(did);
+
+      const result = generateFISCecritures(dmi, did, d.societe_id);
+      if (result.error) {
+        return res.status(400).json({ error: result.error, dmi });
+      }
+
+      const insertE = db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte, sens, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      const txn = db.transaction(() => {
+        for (const e of result.entries) {
+          insertE.run(genId(), e.dossier_id, e.societe_id, e.journal_code, e.date_operation, e.date_piece, e.numero_doc, e.libelle, e.compte, e.sens, e.montant, e.tresorerie);
+        }
+        db.prepare('UPDATE dossiers SET nb_ecritures = (SELECT COUNT(*) FROM ecritures WHERE dossier_id = ?) WHERE id = ?').run(did, did);
+      });
+      txn();
+
+      res.json({ ok: true, dmi: result.dmi, entriesCount: result.entries.length });
+    } finally {
+      try { fs.unlinkSync(req.file.path); } catch {}
+    }
+  } catch (e) {
+    console.error('Process FISC error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

@@ -10,7 +10,7 @@ export default function DossierPage() {
   const [pieces, setPieces] = useState<any[]>([]);
   const [ecritures, setEcritures] = useState<any[]>([]);
   const [factures, setFactures] = useState<any[]>([]);
-  const [journal, setJournal] = useState<'VT J.C' | 'VT C' | null>(null);
+  const [journal, setJournal] = useState<'VT J.C' | 'VT C' | 'FISC' | null>(null);
   const [tab, setTab] = useState<'factures' | 'rapport' | 'ecritures' | 'analyse'>('factures');
   const [rapport, setRapport] = useState<any[]>([]);
   const [analyse, setAnalyse] = useState<any[]>([]);
@@ -53,9 +53,12 @@ export default function DossierPage() {
         setOcrProgress(ok + ' facture(s) extraite(s). Generation VT J.C...');
         await api.generateVTJC(id);
         setOcrProgress('Termine! ' + ok + ' facture(s) + ecritures generees');
-      } else {
+      } else if (journal === 'VT C') {
         const r = await api.processVTC(id, Array.from(files));
         setOcrProgress('Termine! ' + r.totalEntries + ' ecriture(s) VT C extraite(s)');
+      } else if (journal === 'FISC') {
+        const r = await api.processFISC(id, files[0]);
+        setOcrProgress('Termine! ' + r.entriesCount + ' ecriture(s) FISC generee(s)');
       }
       await reload();
     } catch (e: any) { alert('Erreur: ' + e.message); }
@@ -130,6 +133,12 @@ export default function DossierPage() {
       '707100': 'VENTES MARCHANDISES C 0%', '707119': 'VENTES MARCHANDISES C 19%',
       '436711': 'TVA COLLECTEE 19% J.C', '436710': 'TVA COLLECTEE 19% C',
       '437500': 'TIMBRE FISCAL', '634500': 'ECARTS DE REGLEMENT',
+      '457100': 'RF IMPOTS ET TAXE A PAYER', '432100': 'RETENUE A LA SOURCE SUR SALAIRES',
+      '432101': 'CSS', '432300': 'RETENUE A LA SOURCE SUR LOYERS',
+      '432400': 'RETENUE A LA SOURCE SUR MARCHES', '437300': 'TFP',
+      '437200': 'FOPROLOS', '436510': 'TVA A PAYER',
+      '436660': 'TVA DEDUCTIBLE', '436670': 'CREDIT DE TVA A REPORTER',
+      '437400': 'TCL', '661100': 'TFP', '661200': 'FOPROLOS', '661300': 'TCL',
     };
 
     const fmt = (d: string) => { if (d?.includes('-')) { const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; } return d || ''; };
@@ -158,6 +167,7 @@ export default function DossierPage() {
 
   const ecrituresVTJC = ecritures.filter(e => e.journal_code === 'VT J.C');
   const ecrituresVTC = ecritures.filter(e => e.journal_code === 'VT C');
+  const ecrituresFISC = ecritures.filter(e => e.journal_code === 'FISC');
 
   if (!journal) {
     return (
@@ -167,7 +177,7 @@ export default function DossierPage() {
           <div className="bg-white rounded-xl border p-6 text-center">
             <h1 className="text-xl font-bold mb-1">{dossier?.nom}</h1>
             <p className="text-sm text-gray-500 mb-6">Choisir le journal :</p>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <button onClick={() => { setJournal('VT J.C'); setTab('factures'); }} className="border-2 border-violet-200 rounded-xl p-6 hover:border-violet-500 hover:bg-violet-50 transition-all group">
                 <Zap className="w-10 h-10 mx-auto text-violet-500 mb-3 group-hover:scale-110 transition-transform" />
                 <h3 className="font-semibold text-violet-700">VT J.C</h3>
@@ -180,11 +190,18 @@ export default function DossierPage() {
                 <p className="text-xs text-gray-500 mt-1">Factures → Extraction PDF</p>
                 <p className="text-xs text-gray-400 mt-2">{ecrituresVTC.length} ecriture(s)</p>
               </button>
+              <button onClick={() => { setJournal('FISC'); setTab('factures'); }} className="border-2 border-amber-200 rounded-xl p-6 hover:border-amber-500 hover:bg-amber-50 transition-all group">
+                <FileText className="w-10 h-10 mx-auto text-amber-500 mb-3 group-hover:scale-110 transition-transform" />
+                <h3 className="font-semibold text-amber-700">FISC</h3>
+                <p className="text-xs text-gray-500 mt-1">DMI → Extraction PDF</p>
+                <p className="text-xs text-gray-400 mt-2">{ecrituresFISC.length} ecriture(s)</p>
+              </button>
             </div>
           </div>
           <div className="flex gap-2 justify-center">
             {ecrituresVTJC.length > 0 && <button onClick={() => { setJournal('VT J.C'); setTimeout(exportXLSX, 0); }} className="bg-violet-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-violet-700 flex items-center gap-1.5"><FileSpreadsheet className="w-4 h-4" /> XLSX VT J.C</button>}
             {ecrituresVTC.length > 0 && <button onClick={() => { setJournal('VT C'); setTimeout(exportXLSX, 0); }} className="bg-teal-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-700 flex items-center gap-1.5"><FileSpreadsheet className="w-4 h-4" /> XLSX VT C</button>}
+            {ecrituresFISC.length > 0 && <button onClick={() => { setJournal('FISC'); setTimeout(exportXLSX, 0); }} className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 flex items-center gap-1.5"><FileSpreadsheet className="w-4 h-4" /> XLSX FISC</button>}
           </div>
         </div>
       </div>
@@ -193,6 +210,7 @@ export default function DossierPage() {
 
   const isVTJC = journal === 'VT J.C';
   const isVTC = journal === 'VT C';
+  const isFISC = journal === 'FISC';
 
   return (
     <div className="space-y-6">
@@ -204,14 +222,14 @@ export default function DossierPage() {
         </div>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className={`px-3 py-1 rounded-lg text-sm font-bold ${isVTJC ? 'bg-violet-100 text-violet-700' : 'bg-teal-100 text-teal-700'}`}>
-              {isVTJC ? <Zap className="w-4 h-4 inline mr-1" /> : <FileText className="w-4 h-4 inline mr-1" />} {journal}
+            <span className={`px-3 py-1 rounded-lg text-sm font-bold ${isFISC ? 'bg-amber-100 text-amber-700' : isVTJC ? 'bg-violet-100 text-violet-700' : 'bg-teal-100 text-teal-700'}`}>
+              {isFISC ? <FileText className="w-4 h-4 inline mr-1" /> : isVTJC ? <Zap className="w-4 h-4 inline mr-1" /> : <FileText className="w-4 h-4 inline mr-1" />} {journal}
             </span>
             <span className="text-sm text-gray-500">{ecrituresFiltered.length} ecriture(s) | {factures.length} facture(s) | {rapport.length} jour(s) rapport</span>
           </div>
           <div className="flex gap-2">
             <button onClick={exportCSV} disabled={!ecrituresFiltered.length} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"><Download className="w-3 h-3" /> CSV</button>
-            <button onClick={exportXLSX} disabled={!ecrituresFiltered.length} className={`${isVTJC ? 'bg-violet-600 hover:bg-violet-700' : 'bg-teal-600 hover:bg-teal-700'} text-white px-3 py-2 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center gap-1`}><FileSpreadsheet className="w-3 h-3" /> XLSX</button>
+            <button onClick={exportXLSX} disabled={!ecrituresFiltered.length} className={`${isFISC ? 'bg-amber-600 hover:bg-amber-700' : isVTJC ? 'bg-violet-600 hover:bg-violet-700' : 'bg-teal-600 hover:bg-teal-700'} text-white px-3 py-2 rounded-lg text-xs font-medium disabled:opacity-50 flex items-center gap-1`}><FileSpreadsheet className="w-3 h-3" /> XLSX</button>
           </div>
         </div>
       </div>
