@@ -1,6 +1,4 @@
 // FISC journal — DMI PDF parser and ecritures generator
-// Piece A: constatation globale D = total_general (page 13), C = all withholdings + TVA (balancing figure)
-// Pieces B: TFP, C: FOPROLOS, D: RECLASS TVA (4 lines), E: TCL
 
 function parseDMIItems(pdfItems) {
   const result = {
@@ -18,18 +16,23 @@ function parseDMIItems(pdfItems) {
     byPage[item.page].push(item);
   }
 
-  function getDecimals(page) {
+  function getDecimalsWithY(page) {
     const seen = new Set();
-    const nums = [];
+    const items = [];
     for (const item of (byPage[page] || [])) {
       if (!item.str.includes('.')) continue;
       const m = item.str.match(/^\d[\d .]*\d$/);
       if (m) {
         const val = parseFloat(m[0].replace(/ /g, ''));
-        if (!isNaN(val) && val > 0 && !seen.has(val)) { seen.add(val); nums.push(val); }
+        if (!isNaN(val) && val > 0 && !seen.has(val)) { seen.add(val); items.push({ val, y: item.y }); }
       }
     }
-    return nums;
+    items.sort((a, b) => b.y - a.y);
+    return items;
+  }
+
+  function getDecimals(page) {
+    return getDecimalsWithY(page).map(i => i.val);
   }
 
   // Month/Year
@@ -47,35 +50,32 @@ function parseDMIItems(pdfItems) {
   const cssCand = p1.filter(n => n >= 10 && n <= 100);
   if (cssCand.length > 0) result.css = cssCand[0];
 
-  console.log('Page 1:', p1);
-  console.log('Retenue salaires:', result.retenue_salaires, 'CSS:', result.css);
-
-  // Page 4: Retenues (loyers + marchés)
-  const p4 = getDecimals(4);
-  console.log('Page 4 decimals:', p4);
-  const retCand = p4.filter(n => n >= 10 && n <= 5000);
-  retCand.sort((a, b) => a - b);
-  console.log('Retenues candidates (10-5000):', retCand);
+  // Page 4: Retenues (loyers + marchés) — use Y-position sorting
+  // First two values by Y position (top to bottom) are retenue_loyers and retenue_marches
+  const p4items = getDecimalsWithY(4);
+  const p4vals = p4items.map(i => i.val);
+  const retCand = p4vals.filter(n => n >= 10 && n <= 5000);
   if (retCand.length >= 2) {
     result.retenue_loyers = retCand[0];
     result.retenue_marches = retCand[1];
   } else if (retCand.length === 1) {
-    result.retenue_marches = retCand[0];
+    result.retenue_loyers = retCand[0];
   }
-  console.log('retenue_loyers:', result.retenue_loyers, 'retenue_marches:', result.retenue_marches);
 
   // Page 4-5: TVA collectée + TVA déductible
-  const p4Full = getDecimals(4);
-  const p5Full = getDecimals(5);
-  console.log('Page 4 all decimals:', p4Full);
-  console.log('Page 5 all decimals:', p5Full);
-  const allTVA = [...p4Full, ...p5Full];
-  // tva_collectee is typically largest TVA amount (9107.356 for DMI 01)
-  const tvaCollCand = allTVA.filter(n => n >= 1000 && n <= 50000);
-  if (tvaCollCand.length > 0) result.tva_collectee = tvaCollCand[tvaCollCand.length - 1];
-  // tva_deductible is medium TVA amount (1853.5 for DMI 01)
-  const tvaDedCand = allTVA.filter(n => n >= 100 && n <= 5000 && n !== result.tva_collectee);
-  if (tvaDedCand.length > 0) result.tva_deductible = tvaDedCand[tvaDedCand.length - 1];
+  // These are the LARGEST values on pages 4-5 that aren't already used as retenues
+  const p5items = getDecimalsWithY(5);
+  const p5vals = p5items.map(i => i.val);
+  const allPage45 = [...p4vals, ...p5vals];
+  const usedInRetenues = new Set([result.retenue_loyers, result.retenue_marches].filter(n => n > 0));
+  const tvaPool = allPage45.filter(n => n >= 100 && !usedInRetenues.has(n));
+  tvaPool.sort((a, b) => b - a);
+  if (tvaPool.length >= 2) {
+    result.tva_collectee = tvaPool[0];
+    result.tva_deductible = tvaPool[1];
+  } else if (tvaPool.length === 1) {
+    result.tva_deductible = tvaPool[0];
+  }
 
   // Page 6: TVA — sort by Y position (highest Y first = subtotal, then report, then result)
   const p6items = (byPage[6] || []).filter(item => {
@@ -86,14 +86,12 @@ function parseDMIItems(pdfItems) {
     return !isNaN(val) && val > 100 && val < 100000;
   });
   p6items.sort((a, b) => b.y - a.y);
-  // Y=759: subtotal, Y=738: report, Y=549: result
   if (p6items.length >= 3) {
     const subtotal = parseFloat(p6items[0].str.replace(/ /g, ''));
     const report = parseFloat(p6items[1].str.replace(/ /g, ''));
     const resultat = parseFloat(p6items[2].str.replace(/ /g, ''));
     result.tva_report_precedent = report;
     result.tva_resultat = resultat;
-    // Sign: if subtotal > report → ب (due), else → ف (credit)
     result.tva_signe = subtotal > report ? 'ب' : 'ف';
   } else if (p6items.length === 2) {
     result.tva_report_precedent = parseFloat(p6items[0].str.replace(/ /g, ''));
@@ -109,22 +107,9 @@ function parseDMIItems(pdfItems) {
   const timbreCand = p10.filter(n => n >= 40 && n <= 200);
   if (timbreCand.length > 0) result.timbre_fiscal = timbreCand[0];
 
-  // Page 12: TCL + TFP + FOPROLOS (recap page)
-  // Get all decimals with Y positions from page 12
-  const p12Items = [];
-  const p12seen = new Set();
-  for (const item of (byPage[12] || [])) {
-    if (!item.str.includes('.')) continue;
-    const m = item.str.match(/^\d[\d .]*\d$/);
-    if (m) {
-      const val = parseFloat(m[0].replace(/ /g, ''));
-      if (!isNaN(val) && val > 0 && !p12seen.has(val)) { p12seen.add(val); p12Items.push({ val, y: item.y }); }
-    }
-  }
-  p12Items.sort((a, b) => b.y - a.y);
-  console.log('Page 12 items (all):', p12Items.map(i => `${i.val} @ y=${i.y.toFixed(1)}`).join(', '));
-  const p12vals = p12Items.map(i => i.val).filter(n => n >= 50 && n <= 5000);
-  console.log('Page 12 filtered (50-5000):', p12vals);
+  // Page 12: TCL + TFP + FOPROLOS — Y-position sorted, filter 50-5000
+  const p12items = getDecimalsWithY(12);
+  const p12vals = p12items.map(i => i.val).filter(n => n >= 50 && n <= 5000);
   if (p12vals.length >= 3) {
     result.tcl_du = p12vals[0];
     result.tfp_du = p12vals[1];
@@ -140,11 +125,6 @@ function parseDMIItems(pdfItems) {
   const p13 = getDecimals(13);
   const totalCand = p13.filter(n => n >= 1000 && n <= 100000);
   if (totalCand.length > 0) result.total_general = totalCand[totalCand.length - 1];
-
-  console.log('TVA candidates:', { tvaCollCand, tvaDedCand });
-  console.log('TVA parsed:', { collectee: result.tva_collectee, deductible: result.tva_deductible });
-  console.log('TVA from page 6:', { report: result.tva_report_precedent, resultat: result.tva_resultat, signe: result.tva_signe });
-  console.log('Timbre:', result.timbre_fiscal, 'TCL:', result.tcl_du, 'TFP:', result.tfp_du, 'FOPROLOS:', result.foprolos_du, 'Total:', result.total_general);
 
   return result;
 }
@@ -188,7 +168,7 @@ function generateFISCecritures(dmi, dossierId, societeId) {
   if (tvaA > 0) {
     addEntry('436510', 'C', tvaA, `CST ${libelle}`);
   } else if (tvaA < 0) {
-    addEntry('436670', 'C', Math.abs(tvaA), `CST ${libelle}`);
+    addEntry('436670', 'D', Math.abs(tvaA), `CST ${libelle}`);
   }
 
   // Verify Piece A balance
@@ -219,7 +199,6 @@ function generateFISCecritures(dmi, dossierId, societeId) {
   if (dmi.tva_collectee > 0) pieceDEntries.push({ compte: '436710', sens: 'D', montant: dmi.tva_collectee });
   if (dmi.tva_deductible > 0) pieceDEntries.push({ compte: '436660', sens: 'C', montant: dmi.tva_deductible });
   if (dmi.tva_report_precedent > 0) pieceDEntries.push({ compte: '436670', sens: 'C', montant: dmi.tva_report_precedent });
-  // TVA result: if ب (due) → C 436510; if ف (credit) → D 436670
   if (dmi.tva_signe === 'ب' && dmi.tva_resultat > 0) {
     pieceDEntries.push({ compte: '436510', sens: 'C', montant: dmi.tva_resultat });
   } else if (dmi.tva_signe === 'ف' && dmi.tva_resultat > 0) {
