@@ -65,7 +65,7 @@ export default function DossierPage() {
         setOcrProgress('Termine! ' + r.entriesCount + ' ecriture(s) FISC generee(s)');
       }
       await reload(true);
-    } catch (e: any) { alert('Erreur: ' + e.message); }
+    } catch (e: any) { alert('Erreur: ' + e.message + '\n\nCheck Render logs for debug info.'); console.error('FISC error full:', e); }
     finally { setUploading(false); setTimeout(() => setOcrProgress(''), 3000); }
   };
 

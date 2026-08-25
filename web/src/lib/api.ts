@@ -62,7 +62,7 @@ export const api = {
     const fd = new FormData();
     fd.append('file', file);
     const r = await fetch(`${BASE}/dossiers/${did}/process-fisc`, { method: 'POST', body: fd });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Erreur ${r.status}`);
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error + '\n\nDEBUG: ' + JSON.stringify(j.debug, null, 2)); }
     return r.json();
   },
 };
