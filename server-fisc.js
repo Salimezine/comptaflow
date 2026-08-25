@@ -47,16 +47,22 @@ function parseDMIItems(pdfItems) {
   const cssCand = p1.filter(n => n >= 10 && n <= 100);
   if (cssCand.length > 0) result.css = cssCand[0];
 
+  console.log('Page 1:', p1);
+  console.log('Retenue salaires:', result.retenue_salaires, 'CSS:', result.css);
+
   // Page 4: Retenues (loyers + marchés)
   const p4 = getDecimals(4);
-  const retCand = p4.filter(n => n >= 10 && n <= 500);
+  console.log('Page 4 decimals:', p4);
+  const retCand = p4.filter(n => n >= 10 && n <= 5000);
   retCand.sort((a, b) => a - b);
+  console.log('Retenues candidates (10-5000):', retCand);
   if (retCand.length >= 2) {
     result.retenue_loyers = retCand[0];
     result.retenue_marches = retCand[1];
   } else if (retCand.length === 1) {
     result.retenue_marches = retCand[0];
   }
+  console.log('retenue_loyers:', result.retenue_loyers, 'retenue_marches:', result.retenue_marches);
 
   // Page 4-5: TVA collectée + TVA déductible
   const p4Full = getDecimals(4);
@@ -114,7 +120,9 @@ function parseDMIItems(pdfItems) {
     }
   }
   p12Items.sort((a, b) => b.y - a.y);
+  console.log('Page 12 items (all):', p12Items.map(i => `${i.val} @ y=${i.y.toFixed(1)}`).join(', '));
   const p12vals = p12Items.map(i => i.val).filter(n => n >= 50 && n <= 5000);
+  console.log('Page 12 filtered (50-5000):', p12vals);
   if (p12vals.length >= 3) {
     result.tcl_du = p12vals[0];
     result.tfp_du = p12vals[1];
@@ -130,6 +138,11 @@ function parseDMIItems(pdfItems) {
   const p13 = getDecimals(13);
   const totalCand = p13.filter(n => n >= 1000 && n <= 100000);
   if (totalCand.length > 0) result.total_general = totalCand[totalCand.length - 1];
+
+  console.log('TVA candidates:', { tvaCollCand, tvaDedCand });
+  console.log('TVA parsed:', { collectee: result.tva_collectee, deductible: result.tva_deductible });
+  console.log('TVA from page 6:', { report: result.tva_report_precedent, resultat: result.tva_resultat, signe: result.tva_signe });
+  console.log('Timbre:', result.timbre_fiscal, 'TCL:', result.tcl_du, 'TFP:', result.tfp_du, 'FOPROLOS:', result.foprolos_du, 'Total:', result.total_general);
 
   return result;
 }

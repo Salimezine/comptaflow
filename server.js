@@ -500,6 +500,7 @@ app.post('/api/dossiers/:did/process-fisc', upload.single('file'), async (req, r
     try {
       const items = await extractTextItemsFromPDF(req.file.path);
       const dmi = parseDMIItems(items);
+      console.log('FISC parsed DMI:', JSON.stringify(dmi, null, 2));
 
       if (!dmi.mois || !dmi.annee) {
         return res.status(400).json({ error: 'Mois/annee non trouves dans le PDF', dmi });
