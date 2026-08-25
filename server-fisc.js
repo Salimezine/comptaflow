@@ -56,13 +56,16 @@ function parseDMIItems(pdfItems) {
   const fopCand = p3.filter(n => n >= 10 && n <= 500);
   if (fopCand.length > 0) result.foprolos_du = fopCand[fopCand.length - 1];
 
-  // Page 4: Retenues (loyers + marchés) — use Y-position order, not value sort
+  // Page 4: Retenues (loyers + marchés) — deduplicated, Y-position order
+  const p4seen = new Set();
   const p4items = (byPage[4] || []).filter(item => {
     if (!item.str.includes('.')) return false;
     const m = item.str.match(/^\d[\d .]*\d$/);
     if (!m) return false;
     const val = parseFloat(m[0].replace(/ /g, ''));
-    return !isNaN(val) && val >= 10 && val <= 500;
+    if (isNaN(val) || val < 10 || val > 500 || p4seen.has(val)) return false;
+    p4seen.add(val);
+    return true;
   }).map(item => ({ val: parseFloat(item.str.replace(/ /g, '')), y: item.y }));
   p4items.sort((a, b) => b.y - a.y);
   if (p4items.length >= 2) {
