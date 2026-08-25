@@ -175,23 +175,18 @@ function generateFISCecritures(dmi, dossierId, societeId) {
   if (dmi.foprolos_du > 0) { addEntry('661200', 'D', dmi.foprolos_du, `CST FOPROLOSS ${libelle}`); addEntry('437200', 'C', dmi.foprolos_du, `CST FOPROLOSS ${libelle}`); numPiece++; }
   // Piece D: TCL
   if (dmi.tcl_du > 0) { addEntry('661300', 'D', dmi.tcl_du, `CST TCL ${libelle}`); addEntry('437400', 'C', dmi.tcl_du, `CST TCL ${libelle}`); numPiece++; }
-  // Piece E: Reclassification TVA
-  // Only generate if we have enough data to balance
-  const pieceEEntries = [];
-  if (dmi.tva_collectee > 0) pieceEEntries.push({ compte: '436710', sens: 'D', montant: dmi.tva_collectee });
-  if (dmi.tva_deductible > 0) pieceEEntries.push({ compte: '436660', sens: 'C', montant: dmi.tva_deductible });
-  if (dmi.tva_report_precedent > 0) pieceEEntries.push({ compte: '436670', sens: 'D', montant: dmi.tva_report_precedent });
-  if (dmi.tva_signe === 'ب' && dmi.tva_resultat > 0) pieceEEntries.push({ compte: '436510', sens: 'D', montant: dmi.tva_resultat });
-  else if (dmi.tva_signe === 'ف' && dmi.tva_resultat > 0) pieceEEntries.push({ compte: '436670', sens: 'C', montant: dmi.tva_resultat });
-
-  if (pieceEEntries.length > 0) {
-    const totalDE = pieceEEntries.filter(e => e.sens === 'D').reduce((s, e) => s + e.montant, 0);
-    const totalCE = pieceEEntries.filter(e => e.sens === 'C').reduce((s, e) => s + e.montant, 0);
-    if (Math.abs(totalDE - totalCE) < 0.01) {
-      for (const e of pieceEEntries) addEntry(e.compte, e.sens, e.montant, 'RECLASS TVA');
-      numPiece++;
+  // Piece E: Reclassification TVA — balanced 2-line entry
+  if (dmi.tva_resultat > 0) {
+    if (dmi.tva_signe === 'ب') {
+      // TVA due: reduce deductible, recognize payable
+      addEntry('436510', 'D', dmi.tva_resultat, `RECLASS TVA`);
+      addEntry('436660', 'C', dmi.tva_resultat, `RECLASS TVA`);
+    } else if (dmi.tva_signe === 'ف') {
+      // TVA credit: reduce deductible, recognize report
+      addEntry('436660', 'D', dmi.tva_resultat, `RECLASS TVA`);
+      addEntry('436670', 'C', dmi.tva_resultat, `RECLASS TVA`);
     }
-    // If not balanced, skip piece E (incomplete TVA data)
+    numPiece++;
   }
 
   return { entries, dmi };
