@@ -31,10 +31,14 @@ export default function DossierPage() {
   const [fTva, setFTva] = useState('');
   const [fTtc, setFTtc] = useState('');
 
-  const reload = async () => {
+  const reload = async (loadEcritures = false) => {
     if (!id) return;
-    const [d, p, e, f, r] = await Promise.all([api.getDossier(id), api.getPieces(id), api.getEcritures(id), api.getFactures(id), api.getRapport(id)]);
-    setDossier(d); setPieces(p); setEcritures(e); setFactures(f); setRapport(r);
+    const [d, p, f, r] = await Promise.all([api.getDossier(id), api.getPieces(id), api.getFactures(id), api.getRapport(id)]);
+    setDossier(d); setPieces(p); setFactures(f); setRapport(r);
+    if (loadEcritures) {
+      const e = await api.getEcritures(id);
+      setEcritures(e);
+    }
     setLoading(false);
   };
 
@@ -60,7 +64,7 @@ export default function DossierPage() {
         const r = await api.processFISC(id, files[0]);
         setOcrProgress('Termine! ' + r.entriesCount + ' ecriture(s) FISC generee(s)');
       }
-      await reload();
+      await reload(true);
     } catch (e: any) { alert('Erreur: ' + e.message); }
     finally { setUploading(false); setTimeout(() => setOcrProgress(''), 3000); }
   };
@@ -91,12 +95,12 @@ export default function DossierPage() {
     try {
       const result = await api.generateVTJC(id);
       setVtjcResult(result);
-      reload();
+      reload(true);
     } catch (e: any) { alert('Erreur: ' + e.message); }
     finally { setGenerating(false); }
   };
 
-  const delEcriture = async (eid: string) => { await api.deleteEcriture(eid); reload(); };
+  const delEcriture = async (eid: string) => { await api.deleteEcriture(eid); reload(true); };
 
   const handleRapport = async (files: FileList | null) => {
     if (!files?.[0] || !id) return;
@@ -190,7 +194,7 @@ export default function DossierPage() {
                 <p className="text-xs text-gray-500 mt-1">Factures → Extraction PDF</p>
                 <p className="text-xs text-gray-400 mt-2">{ecrituresVTC.length} ecriture(s)</p>
               </button>
-              <button onClick={() => { setJournal('FISC'); setTab('factures'); }} className="border-2 border-amber-200 rounded-xl p-6 hover:border-amber-500 hover:bg-amber-50 transition-all group">
+              <button onClick={() => { setJournal('FISC'); setTab('ecritures'); }} className="border-2 border-amber-200 rounded-xl p-6 hover:border-amber-500 hover:bg-amber-50 transition-all group">
                 <FileText className="w-10 h-10 mx-auto text-amber-500 mb-3 group-hover:scale-110 transition-transform" />
                 <h3 className="font-semibold text-amber-700">FISC</h3>
                 <p className="text-xs text-gray-500 mt-1">DMI → Extraction PDF</p>
@@ -225,7 +229,7 @@ export default function DossierPage() {
             <span className={`px-3 py-1 rounded-lg text-sm font-bold ${isFISC ? 'bg-amber-100 text-amber-700' : isVTJC ? 'bg-violet-100 text-violet-700' : 'bg-teal-100 text-teal-700'}`}>
               {isFISC ? <FileText className="w-4 h-4 inline mr-1" /> : isVTJC ? <Zap className="w-4 h-4 inline mr-1" /> : <FileText className="w-4 h-4 inline mr-1" />} {journal}
             </span>
-            <span className="text-sm text-gray-500">{ecrituresFiltered.length} ecriture(s) | {factures.length} facture(s) | {rapport.length} jour(s) rapport</span>
+            <span className="text-sm text-gray-500">{isFISC ? `${ecrituresFiltered.length} ecriture(s)` : `${ecrituresFiltered.length} ecriture(s) | ${factures.length} facture(s) | ${rapport.length} jour(s) rapport`}</span>
           </div>
           <div className="flex gap-2">
             <button onClick={exportCSV} disabled={!ecrituresFiltered.length} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"><Download className="w-3 h-3" /> CSV</button>
@@ -235,12 +239,70 @@ export default function DossierPage() {
       </div>
 
       <div className="flex gap-2">
-        {(['factures', 'rapport', 'ecritures', 'analyse'] as const).map(t => (
+        {(isFISC ? ['ecritures'] as const : (['factures', 'rapport', 'ecritures', 'analyse'] as const)).map(t => (
           <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-lg text-sm font-medium capitalize ${tab === t ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
             {t === 'analyse' ? <><AlertTriangle className="w-3 h-3 inline mr-1" />Analyse</> : t} {t === 'factures' ? `(${factures.length})` : t === 'ecritures' ? `(${ecrituresFiltered.length})` : t === 'rapport' ? `(${rapport.length})` : ''}
           </button>
         ))}
       </div>
+
+      {isFISC && (
+        <div className="space-y-4">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="font-semibold text-amber-800">Declarations fiscales — DMI</h2>
+                <p className="text-xs text-amber-600 mt-1">Uploadez le PDF DMI du mois. Les ecritures sont generees automatiquement (5 pieces A-E).</p>
+              </div>
+              <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={e => handleUpload(e.target.files)} />
+              <button onClick={() => fileRef.current?.click()} disabled={uploading} className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1.5">
+                <Upload className="w-4 h-4" /> {uploading ? 'Extraction...' : 'Uploadez le DMI PDF'}
+              </button>
+            </div>
+            {ocrProgress && <p className="text-xs text-amber-700 mb-2">{ocrProgress}</p>}
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={exportCSV} disabled={!ecrituresFiltered.length} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"><Download className="w-3 h-3" /> CSV</button>
+            <button onClick={exportXLSX} disabled={!ecrituresFiltered.length} className="bg-amber-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1"><FileSpreadsheet className="w-3 h-3" /> XLSX</button>
+          </div>
+          {ecrituresFiltered.length > 0 && (
+            <div className="bg-white rounded-xl border overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
+                    <th className="px-4 py-3">Date</th><th className="px-4 py-3">N Doc</th><th className="px-4 py-3">Libelle</th><th className="px-4 py-3">Compte</th><th className="px-4 py-3">Sens</th><th className="px-4 py-3 text-right">Montant</th><th className="px-4 py-3"></th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {ecrituresFiltered.map(e => (
+                      <tr key={e.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-2">{e.date_operation}</td>
+                        <td className="px-4 py-2 font-mono text-xs">{e.numero_doc || '-'}</td>
+                        <td className="px-4 py-2">{e.libelle}</td>
+                        <td className="px-4 py-2 font-mono text-xs">{e.compte}</td>
+                        <td className="px-4 py-2"><span className={e.sens === 'D' ? 'text-emerald-600 font-bold' : 'text-blue-600 font-bold'}>{e.sens}</span></td>
+                        <td className="px-4 py-2 text-right font-mono">{(e.montant || 0).toFixed(3)}</td>
+                        <td className="px-4 py-2"><button onClick={() => delEcriture(e.id)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {ecrituresFiltered.length > 0 && (
+            <div className="flex gap-2 justify-end">
+              <button onClick={async () => { if (!id || !confirm('Supprimer ecritures FISC ?')) return; await api.deleteAllEcritures(id); reload(true); }} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1">
+                <Trash2 className="w-4 h-4" /> Supprimer FISC
+              </button>
+            </div>
+          )}
+          {ecrituresFiltered.length === 0 && !uploading && (
+            <div className="bg-white rounded-xl border p-8 text-center text-gray-400 text-sm">
+              Aucune ecriture FISC. Uploadez le DMI PDF pour generer les ecritures.
+            </div>
+          )}
+        </div>
+      )}
 
       {tab === 'factures' && (
         <div className="space-y-4">
@@ -399,7 +461,7 @@ export default function DossierPage() {
           )}
           {ecrituresFiltered.length > 0 && (
             <div className="flex gap-2 justify-end">
-              <button onClick={async () => { if (!id || !confirm('Supprimer ecritures ' + journal + '?')) return; await api.deleteAllEcritures(id); reload(); }} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1">
+              <button onClick={async () => { if (!id || !confirm('Supprimer ecritures ' + journal + '?')) return; await api.deleteAllEcritures(id); reload(true); }} className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1">
                 <Trash2 className="w-4 h-4" /> Supprimer {journal}
               </button>
             </div>
