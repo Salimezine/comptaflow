@@ -20,11 +20,12 @@ function parseDMIItems(pdfItems) {
     const seen = new Set();
     const items = [];
     for (const item of (byPage[page] || [])) {
-      const s = item.str
-        .replace(/٬/g, '')   // Arabic thousands separator
-        .replace(/٫/g, '.')  // Arabic decimal separator
-        .trim();
-      if (!s || !/\d/.test(s)) continue;
+      const raw = item.str.trim();
+      if (!raw) continue;
+      const hasArabicDecimal = raw.includes('٫');
+      const hasDot = raw.includes('.');
+      if (!hasDot && !hasArabicDecimal) continue;
+      const s = raw.replace(/٬/g, '').replace(/٫/g, '.');
       const cleaned = s.replace(/ /g, '');
       const val = parseFloat(cleaned);
       if (!isNaN(val) && val > 0 && !seen.has(val)) { seen.add(val); items.push({ val, y: item.y }); }
@@ -67,15 +68,16 @@ function parseDMIItems(pdfItems) {
 
   // Page 6: TVA result — sort by Y position (highest Y = subtotal, then report, then result)
   const p6items = (byPage[6] || []).filter(item => {
-    const s = item.str
-      .replace(/٬/g, '')
-      .replace(/٫/g, '.')
-      .trim();
+    const raw = item.str.trim();
+    const hasArabicDecimal = raw.includes('٫');
+    const hasDot = raw.includes('.');
+    if (!hasDot && !hasArabicDecimal) return false;
+    const s = raw.replace(/٬/g, '').replace(/٫/g, '.');
     const cleaned = s.replace(/ /g, '');
     const val = parseFloat(cleaned);
     return !isNaN(val) && val > 100 && val < 100000;
   }).map(item => {
-    const s = item.str.replace(/٬/g, '').replace(/٫/g, '.').trim().replace(/ /g, '');
+    const s = item.str.trim().replace(/٬/g, '').replace(/٫/g, '.').replace(/ /g, '');
     return { val: parseFloat(s), y: item.y };
   });
   p6items.sort((a, b) => b.y - a.y);
