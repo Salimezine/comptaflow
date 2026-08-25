@@ -1,4 +1,4 @@
-name: Deploy ComptaFlow
+name: Deploy EUREX
 
 on:
   push:

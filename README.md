@@ -1,4 +1,4 @@
-# ComptaFlow - Generateur d'Ecritures Comptables IA
+# EUREX - Generateur d'Ecritures Comptables IA
 
 Plateforme web permettant de transformer un dossier complet de pieces justificatives (PDF) en ecritures comptables pretes a l'import, conforme au Systeme Comptable des Entreprises tunisiennes (SCE 1996).
 

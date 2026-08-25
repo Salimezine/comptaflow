@@ -1,1 +1,1 @@
-export { ComptaFlowAPI } from './worker';
+export { EUREXAPI } from './worker';

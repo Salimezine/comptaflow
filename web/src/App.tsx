@@ -11,7 +11,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-14">
           <Link to="/" className="flex items-center gap-2">
             <FileText className="w-6 h-6 text-blue-600" />
-            <span className="text-lg font-bold">ComptaFlow</span>
+            <span className="text-lg font-bold">EUREX</span>
           </Link>
           <div className="flex gap-1">
             <Link to="/" className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${loc.pathname === '/' ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}>
