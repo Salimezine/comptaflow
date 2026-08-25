@@ -75,7 +75,7 @@ function parseDMIItems(pdfItems) {
     const s = raw.replace(/٬/g, '').replace(/٫/g, '.');
     const cleaned = s.replace(/ /g, '');
     const val = parseFloat(cleaned);
-    return !isNaN(val) && val > 100 && val < 100000;
+    return !isNaN(val) && val > 5 && val < 100000;
   }).map(item => {
     const s = item.str.trim().replace(/٬/g, '').replace(/٫/g, '.').replace(/ /g, '');
     return { val: parseFloat(s), y: item.y };
