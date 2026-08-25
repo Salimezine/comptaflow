@@ -105,7 +105,8 @@ function parseDMIItems(pdfItems) {
 function generateFISCecritures(dmi, dossierId, societeId) {
   const journal = 'FISC';
   const datePiece = `${dmi.annee}-${dmi.mois}-21`;
-  const libelle = `DMI ${dmi.mois}-${dmi.annee}`;
+  const shortYear = dmi.annee?.slice(-2) || '26';
+  const libelle = `DMI ${dmi.mois}-${shortYear}`;
   const entries = [];
   let numPiece = 1;
 

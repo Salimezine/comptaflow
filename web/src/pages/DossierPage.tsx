@@ -151,10 +151,9 @@ export default function DossierPage() {
     const xlsxRows = [xlsxHeaders];
 
     for (const e of data) {
-      const acctLabel = ACCOUNT_LABELS[e.compte] || e.compte || '';
       xlsxRows.push([
         e.numero_doc || '', fmt(e.date_operation || ''), e.journal_code || '', e.libelle || '',
-        e.compte || '', acctLabel,
+        e.compte || '', e.tresorerie || '',
         e.sens === 'D' ? (e.montant || 0).toFixed(3) : '0.000',
         e.sens === 'C' ? (e.montant || 0).toFixed(3) : '0.000'
       ]);
