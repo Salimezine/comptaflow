@@ -62,18 +62,7 @@ export default function DossierPage() {
         setOcrProgress('Termine! ' + r.totalEntries + ' ecriture(s) VT C extraite(s)');
       } else if (journal === 'FISC') {
         const r = await api.processFISC(id, files[0]);
-        const d = r.debugDecimals || {};
-        const info = `DMI parsed:
-Page 5 decimals: ${JSON.stringify(d[5] || [])}
-Page 6 decimals: ${JSON.stringify(d[6] || [])}
-tva_collectee: ${r.dmi?.tva_collectee}
-tva_report: ${r.dmi?.tva_report_precedent}
-tva_resultat: ${r.dmi?.tva_resultat}
-tva_signe: ${r.dmi?.tva_signe}
-total_general: ${r.dmi?.total_general}`;
-        console.log(info);
         setOcrProgress('Termine! ' + r.entriesCount + ' ecriture(s) FISC generee(s)');
-        alert(info);
       }
       await reload(true);
     } catch (e: any) { alert('Erreur: ' + e.message + '\n\nCheck Render logs for debug info.'); console.error('FISC error full:', e); }
