@@ -20,12 +20,14 @@ function parseDMIItems(pdfItems) {
     const seen = new Set();
     const items = [];
     for (const item of (byPage[page] || [])) {
-      if (!item.str.includes('.')) continue;
-      const m = item.str.match(/^\d[\d .]*\d$/);
-      if (m) {
-        const val = parseFloat(m[0].replace(/ /g, ''));
-        if (!isNaN(val) && val > 0 && !seen.has(val)) { seen.add(val); items.push({ val, y: item.y }); }
-      }
+      const s = item.str
+        .replace(/٬/g, '')   // Arabic thousands separator
+        .replace(/٫/g, '.')  // Arabic decimal separator
+        .trim();
+      if (!s || !/\d/.test(s)) continue;
+      const cleaned = s.replace(/ /g, '');
+      const val = parseFloat(cleaned);
+      if (!isNaN(val) && val > 0 && !seen.has(val)) { seen.add(val); items.push({ val, y: item.y }); }
     }
     items.sort((a, b) => b.y - a.y);
     return items;
@@ -65,27 +67,29 @@ function parseDMIItems(pdfItems) {
 
   // Page 6: TVA result — sort by Y position (highest Y = subtotal, then report, then result)
   const p6items = (byPage[6] || []).filter(item => {
-    if (!item.str.includes('.')) return false;
-    const m = item.str.match(/^\d[\d .]*\d$/);
-    if (!m) return false;
-    const val = parseFloat(m[0].replace(/ /g, ''));
+    const s = item.str
+      .replace(/٬/g, '')
+      .replace(/٫/g, '.')
+      .trim();
+    const cleaned = s.replace(/ /g, '');
+    const val = parseFloat(cleaned);
     return !isNaN(val) && val > 100 && val < 100000;
+  }).map(item => {
+    const s = item.str.replace(/٬/g, '').replace(/٫/g, '.').trim().replace(/ /g, '');
+    return { val: parseFloat(s), y: item.y };
   });
   p6items.sort((a, b) => b.y - a.y);
   if (p6items.length >= 3) {
-    const report = parseFloat(p6items[1].str.replace(/ /g, ''));
-    const resultat = parseFloat(p6items[2].str.replace(/ /g, ''));
-    result.tva_report_precedent = report;
-    result.tva_resultat = resultat;
-    // Sign: if report > result → ب (due), if result > 0 and report ≈ subtotal → ف (credit)
-    const subtotal = parseFloat(p6items[0].str.replace(/ /g, ''));
-    result.tva_signe = subtotal < report ? 'ف' : 'ب';
+    result.tva_report_precedent = p6items[1].val;
+    result.tva_resultat = p6items[2].val;
+    const subtotal = p6items[0].val;
+    result.tva_signe = subtotal < result.tva_report_precedent ? 'ف' : 'ب';
   } else if (p6items.length === 2) {
-    result.tva_report_precedent = parseFloat(p6items[0].str.replace(/ /g, ''));
-    result.tva_resultat = parseFloat(p6items[1].str.replace(/ /g, ''));
+    result.tva_report_precedent = p6items[0].val;
+    result.tva_resultat = p6items[1].val;
     result.tva_signe = 'ب';
   } else if (p6items.length === 1) {
-    result.tva_resultat = parseFloat(p6items[0].str.replace(/ /g, ''));
+    result.tva_resultat = p6items[0].val;
     result.tva_signe = 'ب';
   }
 
