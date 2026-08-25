@@ -38,6 +38,27 @@ function parseDMIItems(pdfItems) {
     return getDecimalsWithY(page).map(i => i.val);
   }
 
+  function getDecimalsWithYAndX(page) {
+    const seen = new Set();
+    const items = [];
+    for (const item of (byPage[page] || [])) {
+      const raw = item.str.trim();
+      if (!raw) continue;
+      const hasArabicDecimal = raw.includes('٫');
+      const hasDot = raw.includes('.');
+      if (!hasDot && !hasArabicDecimal) continue;
+      const s = raw.replace(/٬/g, '').replace(/٫/g, '.');
+      const cleaned = s.replace(/ /g, '');
+      const val = parseFloat(cleaned);
+      if (!isNaN(val) && val > 0 && !seen.has(val)) {
+        seen.add(val);
+        items.push({ val, y: item.y, x: item.x });
+      }
+    }
+    items.sort((a, b) => b.y - a.y);
+    return items;
+  }
+
   // Month/Year
   for (const item of byPage[1] || []) {
     const m1 = item.str.match(/mois\s+0(\d)-20(\d{2})/);
@@ -46,25 +67,43 @@ function parseDMIItems(pdfItems) {
     if (m2 && !result.annee) { result.annee = m2[1]; result.mois = m2[2]; }
   }
 
-  // Page 1: ALL salaire data — retenue_salaires, css, AND retenue_loyers
-  const p1 = getDecimals(1);
-  const salCand = p1.filter(n => n >= 500 && n <= 5000);
-  if (salCand.length > 0) result.retenue_salaires = salCand[0];
-  const cssCand = p1.filter(n => n >= 10 && n <= 100);
-  if (cssCand.length > 0) result.css = cssCand[0];
+  // Page 1: retenue_salaires (432100), css (432101), optionally retenue_loyers (432300), retenue_marches (432400)
+  // Use range 500-2000 for salaires to exclude summary totals (e.g. 4970)
+  const p1 = getDecimalsWithY(1);
+  const salCand = p1.filter(i => i.val >= 500 && i.val <= 2000);
+  if (salCand.length > 0) result.retenue_salaires = salCand[0].val;
+  const cssCand = p1.filter(i => i.val >= 10 && i.val <= 100 && i.val !== result.retenue_salaires);
+  if (cssCand.length > 0) result.css = cssCand[0].val;
 
-  // retenue_loyers: value on page 1 that is NOT retenue_salaires, NOT css, and < 2000
-  const retCand = p1.filter(n => n >= 50 && n <= 2000 && n !== result.retenue_salaires && n !== result.css);
-  if (retCand.length > 0) result.retenue_loyers = retCand[0];
+  // retenue_loyers: value on page 1 that is NOT retenue_salaires, NOT css, in range 50-2000
+  const retCand = p1.filter(i => i.val >= 50 && i.val <= 2000 && i.val !== result.retenue_salaires && i.val !== result.css);
+  if (retCand.length > 0) result.retenue_loyers = retCand[0].val;
 
-  // Page 5: TVA collectée = largest decimal value
-  const p5 = getDecimals(5);
-  const p5sorted = [...p5].sort((a, b) => b - a);
-  if (p5sorted.length >= 1) {
-    result.tva_collectee = p5sorted[0];
+  // Page 10: Timbre — extract FIRST (needed to exclude from page 12)
+  const p10 = getDecimals(10);
+  const timbreCand = p10.filter(n => n >= 40 && n <= 200);
+  if (timbreCand.length > 0) result.timbre_fiscal = timbreCand[0];
+
+  // Page 5: TVA collectée — use DETAIL row (lower Y position), not the largest value
+  // Page 5 has two rows: top row = summary, bottom row = detail with actual TVA collectée
+  const p5items = getDecimalsWithY(5);
+  if (p5items.length > 0) {
+    // Group by Y position (rounded to nearest 5 to handle slight variations)
+    const yGroups = {};
+    for (const item of p5items) {
+      const yKey = Math.round(item.y / 5) * 5;
+      if (!yGroups[yKey]) yGroups[yKey] = [];
+      yGroups[yKey].push(item.val);
+    }
+    const sortedYKeys = Object.keys(yGroups).map(Number).sort((a, b) => a - b);
+    // Use the FIRST group (lowest Y = bottom of page = detail row with actual values)
+    // In PDF coordinates, Y increases upward, so lowest Y = furthest down the page
+    const detailGroup = yGroups[sortedYKeys[0]];
+    if (detailGroup && detailGroup.length > 0) {
+      result.tva_collectee = Math.max(...detailGroup);
+    }
   }
-  // tva_deductible is CALCULATED from balance equation in generateFISCecritures,
-  // not extracted from page 5 (page 5 has intermediate values that confuse heuristics)
+  // tva_deductible is CALCULATED from balance equation in generateFISCecritures
 
   // Page 6: TVA result — sort by Y position (highest Y = subtotal, then report, then result)
   const p6items = (byPage[6] || []).filter(item => {
@@ -95,23 +134,24 @@ function parseDMIItems(pdfItems) {
     result.tva_signe = 'ب';
   }
 
-  // Page 10: Timbre
-  const p10 = getDecimals(10);
-  const timbreCand = p10.filter(n => n >= 40 && n <= 200);
-  if (timbreCand.length > 0) result.timbre_fiscal = timbreCand[0];
-
-  // Page 12: TCL + TFP + FOPROLOS — filter 50-500 (excludes recap totals like 2495)
+  // Page 12: TCL + TFP + FOPROLOS — exclude timbre_fiscal value (already extracted from page 10)
+  // Page 12 has summary rows with multiple columns; values repeat per row.
+  // Filter: 50-500, exclude timbre_fiscal, then pick top 3 unique values by Y position
   const p12items = getDecimalsWithY(12);
-  const p12vals = p12items.map(i => i.val).filter(n => n >= 50 && n <= 500);
-  if (p12vals.length >= 3) {
-    result.tcl_du = p12vals[0];
-    result.tfp_du = p12vals[1];
-    result.foprolos_du = p12vals[2];
-  } else if (p12vals.length === 2) {
-    result.tcl_du = p12vals[0];
-    result.tfp_du = p12vals[1];
-  } else if (p12vals.length === 1) {
-    result.tcl_du = p12vals[0];
+  const p12vals = p12items.map(i => i.val).filter(n =>
+    n >= 50 && n <= 500 && n !== result.timbre_fiscal && n !== result.tcl_du
+  );
+  // Take unique values only
+  const p12unique = [...new Set(p12vals)];
+  if (p12unique.length >= 3) {
+    result.tcl_du = p12unique[0];
+    result.tfp_du = p12unique[1];
+    result.foprolos_du = p12unique[2];
+  } else if (p12unique.length === 2) {
+    result.tcl_du = p12unique[0];
+    result.tfp_du = p12unique[1];
+  } else if (p12unique.length === 1) {
+    result.tcl_du = p12unique[0];
   }
 
   // Page 13: Total general
