@@ -533,6 +533,30 @@ app.post('/api/dossiers/:did/process-fisc', upload.single('file'), async (req, r
   }
 });
 
+// --- DEBUG: DUMP PDF TEXT ITEMS BY PAGE ---
+app.post('/api/debug/dump-pdf', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file' });
+    try {
+      const items = await extractTextItemsFromPDF(req.file.path);
+      const byPage = {};
+      for (const item of items) {
+        if (!byPage[item.page]) byPage[item.page] = [];
+        byPage[item.page].push(item);
+      }
+      const summary = {};
+      for (const [page, pageItems] of Object.entries(byPage)) {
+        summary[page] = pageItems.map(i => ({ str: i.str, x: Math.round(i.x * 100) / 100, y: Math.round(i.y * 100) / 100, w: Math.round(i.width * 100) / 100 }));
+      }
+      res.json({ totalPages: Object.keys(byPage).length, pages: summary });
+    } finally {
+      try { fs.unlinkSync(req.file.path); } catch {}
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- ECRITURES ---
 app.get('/api/dossiers/:did/ecritures', (req, res) => {
   res.json(db.prepare('SELECT * FROM ecritures WHERE dossier_id = ? ORDER BY date_operation, journal_code').all(req.params.did));
