@@ -101,10 +101,30 @@ function parseDMIItems(pdfItems) {
   const timbreCand = p10.filter(n => n >= 40 && n <= 200);
   if (timbreCand.length > 0) result.timbre_fiscal = timbreCand[0];
 
-  // Page 12: TCL (first decimal at y=657)
-  const p12 = getDecimals(12);
-  const tclCand = p12.filter(n => n >= 50 && n <= 5000);
-  if (tclCand.length > 0) result.tcl_du = tclCand[0];
+  // Page 12: TCL + TFP + FOPROLOS (recap page)
+  // Get all decimals with Y positions from page 12
+  const p12Items = [];
+  const p12seen = new Set();
+  for (const item of (byPage[12] || [])) {
+    if (!item.str.includes('.')) continue;
+    const m = item.str.match(/^\d[\d .]*\d$/);
+    if (m) {
+      const val = parseFloat(m[0].replace(/ /g, ''));
+      if (!isNaN(val) && val > 0 && !p12seen.has(val)) { p12seen.add(val); p12Items.push({ val, y: item.y }); }
+    }
+  }
+  p12Items.sort((a, b) => b.y - a.y);
+  const p12vals = p12Items.map(i => i.val).filter(n => n >= 50 && n <= 5000);
+  if (p12vals.length >= 3) {
+    result.tcl_du = p12vals[0];
+    result.tfp_du = p12vals[1];
+    result.foprolos_du = p12vals[2];
+  } else if (p12vals.length === 2) {
+    result.tcl_du = p12vals[0];
+    result.tfp_du = p12vals[1];
+  } else if (p12vals.length === 1) {
+    result.tcl_du = p12vals[0];
+  }
 
   // Page 13: Total general
   const p13 = getDecimals(13);
