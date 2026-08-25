@@ -500,7 +500,14 @@ app.post('/api/dossiers/:did/process-fisc', upload.single('file'), async (req, r
     try {
       const items = await extractTextItemsFromPDF(req.file.path);
       const dmi = parseDMIItems(items);
+      
+      // Debug: raw items on pages 5, 6, 12, 13
+      const debugPages = {};
+      for (const pg of [1, 5, 6, 10, 12, 13]) {
+        debugPages[pg] = items.filter(it => it.page === pg).map(it => ({ str: it.str, x: Math.round(it.x), y: Math.round(it.y) }));
+      }
       console.log('FISC parsed DMI:', JSON.stringify(dmi, null, 2));
+      console.log('FISC debug pages 5/6:', JSON.stringify({ p5: debugPages[5], p6: debugPages[6] }, null, 2));
 
       if (!dmi.mois || !dmi.annee) {
         return res.status(400).json({ error: 'Mois/annee non trouves dans le PDF', dmi });
@@ -523,7 +530,7 @@ app.post('/api/dossiers/:did/process-fisc', upload.single('file'), async (req, r
       });
       txn();
 
-      res.json({ ok: true, dmi: result.dmi, entriesCount: result.entries.length });
+      res.json({ ok: true, dmi: result.dmi, entriesCount: result.entries.length, debugPages });
     } finally {
       try { fs.unlinkSync(req.file.path); } catch {}
     }
