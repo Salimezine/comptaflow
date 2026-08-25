@@ -1,5 +1,6 @@
 // FISC journal — DMI PDF parser and ecritures generator
-// Piece A: D = total_general (page 13), C = all withholdings + TVA (computed as balancing figure)
+// Piece A: constatation globale D = total_general (page 13), C = all withholdings + TVA (balancing figure)
+// Pieces B: TFP, C: FOPROLOS, D: RECLASS TVA (4 lines), E: TCL
 
 function parseDMIItems(pdfItems) {
   const result = {
@@ -46,36 +47,29 @@ function parseDMIItems(pdfItems) {
   const cssCand = p1.filter(n => n >= 10 && n <= 100);
   if (cssCand.length > 0) result.css = cssCand[0];
 
-  // Page 2: TFP (Taxe de Formation Professionnelle)
-  const p2 = getDecimals(2);
-  const tfpCand = p2.filter(n => n >= 10 && n <= 500);
-  if (tfpCand.length > 0) result.tfp_du = tfpCand[tfpCand.length - 1];
-
-  // Page 3: FOPROLOS
-  const p3 = getDecimals(3);
-  const fopCand = p3.filter(n => n >= 10 && n <= 500);
-  if (fopCand.length > 0) result.foprolos_du = fopCand[fopCand.length - 1];
-
-  // Page 4: Retenues (loyers + marchés) — deduplicated, Y-position order
-  const p4seen = new Set();
-  const p4items = (byPage[4] || []).filter(item => {
-    if (!item.str.includes('.')) return false;
-    const m = item.str.match(/^\d[\d .]*\d$/);
-    if (!m) return false;
-    const val = parseFloat(m[0].replace(/ /g, ''));
-    if (isNaN(val) || val < 10 || val > 500 || p4seen.has(val)) return false;
-    p4seen.add(val);
-    return true;
-  }).map(item => ({ val: parseFloat(item.str.replace(/ /g, '')), y: item.y }));
-  p4items.sort((a, b) => b.y - a.y);
-  if (p4items.length >= 2) {
-    result.retenue_loyers = p4items[0].val;
-    result.retenue_marches = p4items[1].val;
-  } else if (p4items.length === 1) {
-    result.retenue_marches = p4items[0].val;
+  // Page 4: Retenues (loyers + marchés)
+  const p4 = getDecimals(4);
+  const retCand = p4.filter(n => n >= 10 && n <= 500);
+  retCand.sort((a, b) => a - b);
+  if (retCand.length >= 2) {
+    result.retenue_loyers = retCand[0];
+    result.retenue_marches = retCand[1];
+  } else if (retCand.length === 1) {
+    result.retenue_marches = retCand[0];
   }
 
-  // Page 6: TVA — sort by Y position (highest Y = first line = subtotal)
+  // Page 4-5: TVA collectée + TVA déductible
+  const p4Full = getDecimals(4);
+  const p5Full = getDecimals(5);
+  const allTVA = [...p4Full, ...p5Full];
+  // tva_collectee is typically largest TVA amount (9107.356 for DMI 01)
+  const tvaCollCand = allTVA.filter(n => n >= 1000 && n <= 50000);
+  if (tvaCollCand.length > 0) result.tva_collectee = tvaCollCand[tvaCollCand.length - 1];
+  // tva_deductible is medium TVA amount (1853.5 for DMI 01)
+  const tvaDedCand = allTVA.filter(n => n >= 100 && n <= 5000 && n !== result.tva_collectee);
+  if (tvaDedCand.length > 0) result.tva_deductible = tvaDedCand[tvaDedCand.length - 1];
+
+  // Page 6: TVA — sort by Y position (highest Y first = subtotal, then report, then result)
   const p6items = (byPage[6] || []).filter(item => {
     if (!item.str.includes('.')) return false;
     const m = item.str.match(/^\d[\d .]*\d$/);
@@ -83,7 +77,7 @@ function parseDMIItems(pdfItems) {
     const val = parseFloat(m[0].replace(/ /g, ''));
     return !isNaN(val) && val > 100 && val < 100000;
   });
-  p6items.sort((a, b) => b.y - a.y); // highest Y first
+  p6items.sort((a, b) => b.y - a.y);
   // Y=759: subtotal, Y=738: report, Y=549: result
   if (p6items.length >= 3) {
     const subtotal = parseFloat(p6items[0].str.replace(/ /g, ''));
@@ -123,8 +117,7 @@ function parseDMIItems(pdfItems) {
 function generateFISCecritures(dmi, dossierId, societeId) {
   const journal = 'FISC';
   const datePiece = `${dmi.annee}-${dmi.mois}-21`;
-  const shortYear = dmi.annee?.slice(-2) || '26';
-  const libelle = `DMI ${dmi.mois}-${shortYear}`;
+  const libelle = `DMI ${dmi.mois}-${dmi.annee}`;
   const entries = [];
   let numPiece = 1;
 
@@ -148,10 +141,12 @@ function generateFISCecritures(dmi, dossierId, societeId) {
   if (dmi.css > 0) addEntry('432101', 'C', dmi.css, `CST ${libelle}`);
   if (dmi.retenue_loyers > 0) addEntry('432300', 'C', dmi.retenue_loyers, `CST ${libelle}`);
   if (dmi.retenue_marches > 0) addEntry('432400', 'C', dmi.retenue_marches, `CST ${libelle}`);
+  if (dmi.tfp_du > 0) addEntry('437300', 'C', dmi.tfp_du, `CST ${libelle}`);
+  if (dmi.foprolos_du > 0) addEntry('437200', 'C', dmi.foprolos_du, `CST ${libelle}`);
   if (dmi.timbre_fiscal > 0) addEntry('437500', 'C', dmi.timbre_fiscal, `CST ${libelle}`);
   if (dmi.tcl_du > 0) addEntry('437400', 'C', dmi.tcl_du, `CST ${libelle}`);
 
-  // TVA in piece A = balancing figure
+  // TVA in piece A = balancing figure (total_general - sum of other credits)
   const sumC = entries.filter(e => e.numero_doc === `${libelle} P1` && e.sens === 'C')
     .reduce((s, e) => s + e.montant, 0);
   const tvaA = Math.round((dmi.total_general - sumC) * 1000) / 1000;
@@ -161,6 +156,7 @@ function generateFISCecritures(dmi, dossierId, societeId) {
     addEntry('436670', 'C', Math.abs(tvaA), `CST ${libelle}`);
   }
 
+  // Verify Piece A balance
   const pieceA = entries.filter(e => e.numero_doc === `${libelle} P1`);
   const totalDA = pieceA.filter(e => e.sens === 'D').reduce((s, e) => s + e.montant, 0);
   const totalCA = pieceA.filter(e => e.sens === 'C').reduce((s, e) => s + e.montant, 0);
@@ -169,23 +165,45 @@ function generateFISCecritures(dmi, dossierId, societeId) {
   }
   numPiece++;
 
-  // Piece B: TFP
-  if (dmi.tfp_du > 0) { addEntry('661100', 'D', dmi.tfp_du, `CST TFP ${libelle}`); addEntry('437300', 'C', dmi.tfp_du, `CST TFP ${libelle}`); numPiece++; }
-  // Piece C: FOPROLOS
-  if (dmi.foprolos_du > 0) { addEntry('661200', 'D', dmi.foprolos_du, `CST FOPROLOSS ${libelle}`); addEntry('437200', 'C', dmi.foprolos_du, `CST FOPROLOSS ${libelle}`); numPiece++; }
-  // Piece D: TCL
-  if (dmi.tcl_du > 0) { addEntry('661300', 'D', dmi.tcl_du, `CST TCL ${libelle}`); addEntry('437400', 'C', dmi.tcl_du, `CST TCL ${libelle}`); numPiece++; }
-  // Piece E: Reclassification TVA — balanced 2-line entry
-  if (dmi.tva_resultat > 0) {
-    if (dmi.tva_signe === 'ب') {
-      // TVA due: reduce deductible, recognize payable
-      addEntry('436510', 'D', dmi.tva_resultat, `RECLASS TVA`);
-      addEntry('436660', 'C', dmi.tva_resultat, `RECLASS TVA`);
-    } else if (dmi.tva_signe === 'ف') {
-      // TVA credit: reduce deductible, recognize report
-      addEntry('436660', 'D', dmi.tva_resultat, `RECLASS TVA`);
-      addEntry('436670', 'C', dmi.tva_resultat, `RECLASS TVA`);
+  // Piece B: TFP (661100→437300)
+  if (dmi.tfp_du > 0) {
+    addEntry('661100', 'D', dmi.tfp_du, `CST TFP ${libelle}`);
+    addEntry('437300', 'C', dmi.tfp_du, `CST TFP ${libelle}`);
+    numPiece++;
+  }
+
+  // Piece C: FOPROLOS (661200→437200)
+  if (dmi.foprolos_du > 0) {
+    addEntry('661200', 'D', dmi.foprolos_du, `CST FOPROLOSS ${libelle}`);
+    addEntry('437200', 'C', dmi.foprolos_du, `CST FOPROLOSS ${libelle}`);
+    numPiece++;
+  }
+
+  // Piece D: RECLASS TVA (4 lines)
+  const pieceDEntries = [];
+  if (dmi.tva_collectee > 0) pieceDEntries.push({ compte: '436710', sens: 'D', montant: dmi.tva_collectee });
+  if (dmi.tva_deductible > 0) pieceDEntries.push({ compte: '436660', sens: 'C', montant: dmi.tva_deductible });
+  if (dmi.tva_report_precedent > 0) pieceDEntries.push({ compte: '436670', sens: 'C', montant: dmi.tva_report_precedent });
+  // TVA result: if ب (due) → C 436510; if ف (credit) → D 436670
+  if (dmi.tva_signe === 'ب' && dmi.tva_resultat > 0) {
+    pieceDEntries.push({ compte: '436510', sens: 'C', montant: dmi.tva_resultat });
+  } else if (dmi.tva_signe === 'ف' && dmi.tva_resultat > 0) {
+    pieceDEntries.push({ compte: '436670', sens: 'D', montant: dmi.tva_resultat });
+  }
+
+  if (pieceDEntries.length > 0) {
+    const totalDE = pieceDEntries.filter(e => e.sens === 'D').reduce((s, e) => s + e.montant, 0);
+    const totalCE = pieceDEntries.filter(e => e.sens === 'C').reduce((s, e) => s + e.montant, 0);
+    if (Math.abs(totalDE - totalCE) < 0.01) {
+      for (const e of pieceDEntries) addEntry(e.compte, e.sens, e.montant, 'RECLASS TVA');
+      numPiece++;
     }
+  }
+
+  // Piece E: TCL (661300→437400)
+  if (dmi.tcl_du > 0) {
+    addEntry('661300', 'D', dmi.tcl_du, `CST TCL ${libelle}`);
+    addEntry('437400', 'C', dmi.tcl_du, `CST TCL ${libelle}`);
     numPiece++;
   }
 
