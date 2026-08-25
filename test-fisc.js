@@ -82,32 +82,32 @@ async function testDMI01() {
   assert('entries count', result.entries.length, 18);
 
   // Piece A: constatation
-  assertEntry(result.entries, 'DMI 01-2026 P1', '457100', 'D', 5771.764, 'CST DMI 01-2026');
-  assertEntry(result.entries, 'DMI 01-2026 P1', '432100', 'C', 1281.564);
-  assertEntry(result.entries, 'DMI 01-2026 P1', '432101', 'C', 32.727);
-  assertEntry(result.entries, 'DMI 01-2026 P1', '437300', 'C', 104.413);
-  assertEntry(result.entries, 'DMI 01-2026 P1', '437200', 'C', 52.206);
-  assertEntry(result.entries, 'DMI 01-2026 P1', '437500', 'C', 67);
-  assertEntry(result.entries, 'DMI 01-2026 P1', '437400', 'C', 366.568);
-  assertEntry(result.entries, 'DMI 01-2026 P1', '436510', 'C', 3867.286);
+  assertEntry(result.entries, 'DMI 01-26 P1', '457100', 'D', 5771.764, 'CST DMI 01-26');
+  assertEntry(result.entries, 'DMI 01-26 P1', '432100', 'C', 1281.564);
+  assertEntry(result.entries, 'DMI 01-26 P1', '432101', 'C', 32.727);
+  assertEntry(result.entries, 'DMI 01-26 P1', '437300', 'C', 104.413);
+  assertEntry(result.entries, 'DMI 01-26 P1', '437200', 'C', 52.206);
+  assertEntry(result.entries, 'DMI 01-26 P1', '437500', 'C', 67);
+  assertEntry(result.entries, 'DMI 01-26 P1', '437400', 'C', 366.568);
+  assertEntry(result.entries, 'DMI 01-26 P1', '436510', 'C', 3867.286);
 
   // Piece B: TFP
-  assertEntry(result.entries, 'DMI 01-2026 P2', '661100', 'D', 104.413);
-  assertEntry(result.entries, 'DMI 01-2026 P2', '437300', 'C', 104.413);
+  assertEntry(result.entries, 'DMI 01-26 P2', '661100', 'D', 104.413, 'CST TFP 01-26');
+  assertEntry(result.entries, 'DMI 01-26 P2', '437300', 'C', 104.413, 'CST TFP 01-26');
 
   // Piece C: FOPROLOS
-  assertEntry(result.entries, 'DMI 01-2026 P3', '661200', 'D', 52.206);
-  assertEntry(result.entries, 'DMI 01-2026 P3', '437200', 'C', 52.206);
+  assertEntry(result.entries, 'DMI 01-26 P3', '661200', 'D', 52.206, 'CST FOPROLOSS 01-26');
+  assertEntry(result.entries, 'DMI 01-26 P3', '437200', 'C', 52.206, 'CST FOPROLOSS 01-26');
 
   // Piece D: RECLASS TVA (ب = due)
-  assertEntry(result.entries, 'DMI 01-2026 P4', '436710', 'D', 9107.356, 'RECLASS TVA');
-  assertEntry(result.entries, 'DMI 01-2026 P4', '436660', 'C', 1853.5, 'RECLASS TVA');
-  assertEntry(result.entries, 'DMI 01-2026 P4', '436670', 'C', 3386.57, 'RECLASS TVA');
-  assertEntry(result.entries, 'DMI 01-2026 P4', '436510', 'C', 3867.286, 'RECLASS TVA');
+  assertEntry(result.entries, 'DMI 01-26 P4', '436710', 'D', 9107.356, 'RECLASS TVA');
+  assertEntry(result.entries, 'DMI 01-26 P4', '436660', 'C', 1853.5, 'RECLASS TVA');
+  assertEntry(result.entries, 'DMI 01-26 P4', '436670', 'C', 3386.57, 'RECLASS TVA');
+  assertEntry(result.entries, 'DMI 01-26 P4', '436510', 'C', 3867.286, 'RECLASS TVA');
 
   // Piece E: TCL
-  assertEntry(result.entries, 'DMI 01-2026 P5', '661300', 'D', 366.568);
-  assertEntry(result.entries, 'DMI 01-2026 P5', '437400', 'C', 366.568);
+  assertEntry(result.entries, 'DMI 01-26 P5', '661300', 'D', 366.568, 'CST TCL 01-26');
+  assertEntry(result.entries, 'DMI 01-26 P5', '437400', 'C', 366.568, 'CST TCL 01-26');
 
   // Verify all pieces balance
   const pieces = {};
@@ -144,33 +144,33 @@ function testDMI02() {
   assert('entries count', result.entries.length, 19);
 
   // Piece A: constatation
-  assertEntry(result.entries, 'DMI 02-2026 P1', '457100', 'D', 2519.623, 'CST DMI 02-2026');
-  assertEntry(result.entries, 'DMI 02-2026 P1', '432100', 'C', 1281.564);
-  assertEntry(result.entries, 'DMI 02-2026 P1', '432101', 'C', 32.727);
-  assertEntry(result.entries, 'DMI 02-2026 P1', '432300', 'C', 300);
-  assertEntry(result.entries, 'DMI 02-2026 P1', '437300', 'C', 104.413);
-  assertEntry(result.entries, 'DMI 02-2026 P1', '437200', 'C', 52.206);
-  assertEntry(result.entries, 'DMI 02-2026 P1', '437500', 'C', 46);
-  assertEntry(result.entries, 'DMI 02-2026 P1', '437400', 'C', 202.713);
-  assertEntry(result.entries, 'DMI 02-2026 P1', '436510', 'C', 500);
+  assertEntry(result.entries, 'DMI 02-26 P1', '457100', 'D', 2519.623, 'CST DMI 02-26');
+  assertEntry(result.entries, 'DMI 02-26 P1', '432100', 'C', 1281.564);
+  assertEntry(result.entries, 'DMI 02-26 P1', '432101', 'C', 32.727);
+  assertEntry(result.entries, 'DMI 02-26 P1', '432300', 'C', 300);
+  assertEntry(result.entries, 'DMI 02-26 P1', '437300', 'C', 104.413);
+  assertEntry(result.entries, 'DMI 02-26 P1', '437200', 'C', 52.206);
+  assertEntry(result.entries, 'DMI 02-26 P1', '437500', 'C', 46);
+  assertEntry(result.entries, 'DMI 02-26 P1', '437400', 'C', 202.713);
+  assertEntry(result.entries, 'DMI 02-26 P1', '436510', 'C', 500);
 
   // Piece B: TFP
-  assertEntry(result.entries, 'DMI 02-2026 P2', '661100', 'D', 104.413);
-  assertEntry(result.entries, 'DMI 02-2026 P2', '437300', 'C', 104.413);
+  assertEntry(result.entries, 'DMI 02-26 P2', '661100', 'D', 104.413, 'CST TFP 02-26');
+  assertEntry(result.entries, 'DMI 02-26 P2', '437300', 'C', 104.413, 'CST TFP 02-26');
 
   // Piece C: FOPROLOS
-  assertEntry(result.entries, 'DMI 02-2026 P3', '661200', 'D', 52.206);
-  assertEntry(result.entries, 'DMI 02-2026 P3', '437200', 'C', 52.206);
+  assertEntry(result.entries, 'DMI 02-26 P3', '661200', 'D', 52.206, 'CST FOPROLOSS 02-26');
+  assertEntry(result.entries, 'DMI 02-26 P3', '437200', 'C', 52.206, 'CST FOPROLOSS 02-26');
 
   // Piece D: RECLASS TVA (ف = credit)
-  assertEntry(result.entries, 'DMI 02-2026 P4', '436710', 'D', 4339.679, 'RECLASS TVA');
-  assertEntry(result.entries, 'DMI 02-2026 P4', '436660', 'C', 665.171, 'RECLASS TVA');
-  assertEntry(result.entries, 'DMI 02-2026 P4', '436670', 'C', 9142.440, 'RECLASS TVA');
-  assertEntry(result.entries, 'DMI 02-2026 P4', '436670', 'D', 5467.932, 'RECLASS TVA');
+  assertEntry(result.entries, 'DMI 02-26 P4', '436710', 'D', 4339.679, 'RECLASS TVA');
+  assertEntry(result.entries, 'DMI 02-26 P4', '436660', 'C', 665.171, 'RECLASS TVA');
+  assertEntry(result.entries, 'DMI 02-26 P4', '436670', 'C', 9142.440, 'RECLASS TVA');
+  assertEntry(result.entries, 'DMI 02-26 P4', '436670', 'D', 5467.932, 'RECLASS TVA');
 
   // Piece E: TCL
-  assertEntry(result.entries, 'DMI 02-2026 P5', '661300', 'D', 202.713);
-  assertEntry(result.entries, 'DMI 02-2026 P5', '437400', 'C', 202.713);
+  assertEntry(result.entries, 'DMI 02-26 P5', '661300', 'D', 202.713, 'CST TCL 02-26');
+  assertEntry(result.entries, 'DMI 02-26 P5', '437400', 'C', 202.713, 'CST TCL 02-26');
 
   // Verify all pieces balance
   const pieces = {};
@@ -207,24 +207,24 @@ function testDMI03() {
   assert('entries count', result.entries.length, 18);
 
   // Piece A: constatation — sum C = 1311.290+33.718+1150+109.289+54.644+66+356.079 = 3081.020 = total
-  assertEntry(result.entries, 'DMI 03-2026 P1', '457100', 'D', 3081.020, 'CST DMI 03-2026');
-  assertEntry(result.entries, 'DMI 03-2026 P1', '432100', 'C', 1311.290);
-  assertEntry(result.entries, 'DMI 03-2026 P1', '432101', 'C', 33.718);
-  assertEntry(result.entries, 'DMI 03-2026 P1', '432300', 'C', 1150);
-  assertEntry(result.entries, 'DMI 03-2026 P1', '437300', 'C', 109.289);
-  assertEntry(result.entries, 'DMI 03-2026 P1', '437200', 'C', 54.644);
-  assertEntry(result.entries, 'DMI 03-2026 P1', '437500', 'C', 66);
-  assertEntry(result.entries, 'DMI 03-2026 P1', '437400', 'C', 356.079);
+  assertEntry(result.entries, 'DMI 03-26 P1', '457100', 'D', 3081.020, 'CST DMI 03-26');
+  assertEntry(result.entries, 'DMI 03-26 P1', '432100', 'C', 1311.290);
+  assertEntry(result.entries, 'DMI 03-26 P1', '432101', 'C', 33.718);
+  assertEntry(result.entries, 'DMI 03-26 P1', '432300', 'C', 1150);
+  assertEntry(result.entries, 'DMI 03-26 P1', '437300', 'C', 109.289);
+  assertEntry(result.entries, 'DMI 03-26 P1', '437200', 'C', 54.644);
+  assertEntry(result.entries, 'DMI 03-26 P1', '437500', 'C', 66);
+  assertEntry(result.entries, 'DMI 03-26 P1', '437400', 'C', 356.079);
 
   // Piece D: RECLASS TVA — tvaDed = 7117.174+50.758-5467.932 = 1700.000
-  assertEntry(result.entries, 'DMI 03-2026 P4', '436710', 'D', 7117.174, 'RECLASS TVA');
-  assertEntry(result.entries, 'DMI 03-2026 P4', '436660', 'C', 1700, 'RECLASS TVA');
-  assertEntry(result.entries, 'DMI 03-2026 P4', '436670', 'C', 5467.932, 'RECLASS TVA');
-  assertEntry(result.entries, 'DMI 03-2026 P4', '436670', 'D', 50.758, 'RECLASS TVA');
+  assertEntry(result.entries, 'DMI 03-26 P4', '436710', 'D', 7117.174, 'RECLASS TVA');
+  assertEntry(result.entries, 'DMI 03-26 P4', '436660', 'C', 1700, 'RECLASS TVA');
+  assertEntry(result.entries, 'DMI 03-26 P4', '436670', 'C', 5467.932, 'RECLASS TVA');
+  assertEntry(result.entries, 'DMI 03-26 P4', '436670', 'D', 50.758, 'RECLASS TVA');
 
   // Piece E: TCL
-  assertEntry(result.entries, 'DMI 03-2026 P5', '661300', 'D', 356.079);
-  assertEntry(result.entries, 'DMI 03-2026 P5', '437400', 'C', 356.079);
+  assertEntry(result.entries, 'DMI 03-26 P5', '661300', 'D', 356.079, 'CST TCL 03-26');
+  assertEntry(result.entries, 'DMI 03-26 P5', '437400', 'C', 356.079, 'CST TCL 03-26');
 
   // Verify all pieces balance
   const pieces = {};
@@ -258,7 +258,7 @@ function testNoTVA() {
   // sumC = 1000+50+100+50+20+80 = 1300 = total_general → no 436510 line
   const result = generateFISCecritures(dmi, 'test4', 'soc4');
   assert('no error', result.error, undefined);
-  const p1Entries = result.entries.filter(e => e.numero_doc === 'DMI 01-2026 P1');
+  const p1Entries = result.entries.filter(e => e.numero_doc === 'DMI 01-26 P1');
   const tvaEntry = p1Entries.find(e => e.compte === '436510');
   assert('no 436510 entry', tvaEntry, undefined);
   assert('P1 has 7 entries (no TVA line)', p1Entries.length, 7);

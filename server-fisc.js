@@ -165,7 +165,7 @@ function parseDMIItems(pdfItems) {
 function generateFISCecritures(dmi, dossierId, societeId) {
   const journal = 'FISC';
   const datePiece = `${dmi.annee}-${dmi.mois}-21`;
-  const libelle = `DMI ${dmi.mois}-${dmi.annee}`;
+  const libelle = `DMI ${dmi.mois}-${dmi.annee.slice(-2)}`;
   const entries = [];
   let numPiece = 1;
 
@@ -213,17 +213,19 @@ function generateFISCecritures(dmi, dossierId, societeId) {
   }
   numPiece++;
 
+  const shortDate = `${dmi.mois}-${dmi.annee.slice(-2)}`;
+
   // Piece B: TFP (661100→437300)
   if (dmi.tfp_du > 0) {
-    addEntry('661100', 'D', dmi.tfp_du, `CST TFP ${libelle}`);
-    addEntry('437300', 'C', dmi.tfp_du, `CST TFP ${libelle}`);
+    addEntry('661100', 'D', dmi.tfp_du, `CST TFP ${shortDate}`);
+    addEntry('437300', 'C', dmi.tfp_du, `CST TFP ${shortDate}`);
     numPiece++;
   }
 
   // Piece C: FOPROLOS (661200→437200)
   if (dmi.foprolos_du > 0) {
-    addEntry('661200', 'D', dmi.foprolos_du, `CST FOPROLOSS ${libelle}`);
-    addEntry('437200', 'C', dmi.foprolos_du, `CST FOPROLOSS ${libelle}`);
+    addEntry('661200', 'D', dmi.foprolos_du, `CST FOPROLOSS ${shortDate}`);
+    addEntry('437200', 'C', dmi.foprolos_du, `CST FOPROLOSS ${shortDate}`);
     numPiece++;
   }
 
@@ -262,8 +264,8 @@ function generateFISCecritures(dmi, dossierId, societeId) {
 
   // Piece E: TCL (661300→437400)
   if (dmi.tcl_du > 0) {
-    addEntry('661300', 'D', dmi.tcl_du, `CST TCL ${libelle}`);
-    addEntry('437400', 'C', dmi.tcl_du, `CST TCL ${libelle}`);
+    addEntry('661300', 'D', dmi.tcl_du, `CST TCL ${shortDate}`);
+    addEntry('437400', 'C', dmi.tcl_du, `CST TCL ${shortDate}`);
     numPiece++;
   }
 
