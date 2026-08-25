@@ -46,15 +46,30 @@ function parseDMIItems(pdfItems) {
   const cssCand = p1.filter(n => n >= 10 && n <= 100);
   if (cssCand.length > 0) result.css = cssCand[0];
 
-  // Page 4: Retenues (loyers + marchés)
-  const p4 = getDecimals(4);
-  const retCand = p4.filter(n => n >= 10 && n <= 500);
-  retCand.sort((a, b) => a - b);
-  if (retCand.length >= 2) {
-    result.retenue_loyers = retCand[0];
-    result.retenue_marches = retCand[1];
-  } else if (retCand.length === 1) {
-    result.retenue_marches = retCand[0];
+  // Page 2: TFP (Taxe de Formation Professionnelle)
+  const p2 = getDecimals(2);
+  const tfpCand = p2.filter(n => n >= 10 && n <= 500);
+  if (tfpCand.length > 0) result.tfp_du = tfpCand[tfpCand.length - 1];
+
+  // Page 3: FOPROLOS
+  const p3 = getDecimals(3);
+  const fopCand = p3.filter(n => n >= 10 && n <= 500);
+  if (fopCand.length > 0) result.foprolos_du = fopCand[fopCand.length - 1];
+
+  // Page 4: Retenues (loyers + marchés) — use Y-position order, not value sort
+  const p4items = (byPage[4] || []).filter(item => {
+    if (!item.str.includes('.')) return false;
+    const m = item.str.match(/^\d[\d .]*\d$/);
+    if (!m) return false;
+    const val = parseFloat(m[0].replace(/ /g, ''));
+    return !isNaN(val) && val >= 10 && val <= 500;
+  }).map(item => ({ val: parseFloat(item.str.replace(/ /g, '')), y: item.y }));
+  p4items.sort((a, b) => b.y - a.y);
+  if (p4items.length >= 2) {
+    result.retenue_loyers = p4items[0].val;
+    result.retenue_marches = p4items[1].val;
+  } else if (p4items.length === 1) {
+    result.retenue_marches = p4items[0].val;
   }
 
   // Page 6: TVA — sort by Y position (highest Y = first line = subtotal)
@@ -130,8 +145,6 @@ function generateFISCecritures(dmi, dossierId, societeId) {
   if (dmi.css > 0) addEntry('432101', 'C', dmi.css, `CST ${libelle}`);
   if (dmi.retenue_loyers > 0) addEntry('432300', 'C', dmi.retenue_loyers, `CST ${libelle}`);
   if (dmi.retenue_marches > 0) addEntry('432400', 'C', dmi.retenue_marches, `CST ${libelle}`);
-  if (dmi.tfp_du > 0) addEntry('437300', 'C', dmi.tfp_du, `CST ${libelle}`);
-  if (dmi.foprolos_du > 0) addEntry('437200', 'C', dmi.foprolos_du, `CST ${libelle}`);
   if (dmi.timbre_fiscal > 0) addEntry('437500', 'C', dmi.timbre_fiscal, `CST ${libelle}`);
   if (dmi.tcl_du > 0) addEntry('437400', 'C', dmi.tcl_du, `CST ${libelle}`);
 
