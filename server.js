@@ -511,7 +511,7 @@ app.post('/api/dossiers/:did/process-fisc', upload.single('file'), async (req, r
 
       const result = generateFISCecritures(dmi, did, d.societe_id);
       if (result.error) {
-        return res.status(400).json({ error: result.error, dmi });
+        return res.status(400).json({ error: result.error, dmi, debug: { retenue_salaires: dmi.retenue_salaires, css: dmi.css, retenue_loyers: dmi.retenue_loyers, retenue_marches: dmi.retenue_marches, tfp_du: dmi.tfp_du, foprolos_du: dmi.foprolos_du, timbre_fiscal: dmi.timbre_fiscal, tcl_du: dmi.tcl_du, total_general: dmi.total_general, tva_collectee: dmi.tva_collectee, tva_deductible: dmi.tva_deductible, tva_report_precedent: dmi.tva_report_precedent, tva_resultat: dmi.tva_resultat, tva_signe: dmi.tva_signe } });
       }
 
       const insertE = db.prepare('INSERT INTO ecritures (id, dossier_id, societe_id, journal_code, date_operation, date_piece, numero_doc, libelle, compte, sens, montant, tresorerie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');

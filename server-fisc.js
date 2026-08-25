@@ -67,6 +67,8 @@ function parseDMIItems(pdfItems) {
   // Page 4-5: TVA collectée + TVA déductible
   const p4Full = getDecimals(4);
   const p5Full = getDecimals(5);
+  console.log('Page 4 all decimals:', p4Full);
+  console.log('Page 5 all decimals:', p5Full);
   const allTVA = [...p4Full, ...p5Full];
   // tva_collectee is typically largest TVA amount (9107.356 for DMI 01)
   const tvaCollCand = allTVA.filter(n => n >= 1000 && n <= 50000);
