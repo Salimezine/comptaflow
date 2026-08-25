@@ -546,7 +546,11 @@ app.post('/api/debug/dump-pdf', upload.single('file'), async (req, res) => {
       }
       const summary = {};
       for (const [page, pageItems] of Object.entries(byPage)) {
-        summary[page] = pageItems.map(i => ({ str: i.str, x: Math.round(i.x * 100) / 100, y: Math.round(i.y * 100) / 100, w: Math.round(i.width * 100) / 100 }));
+        const nums = pageItems.filter(i => /\d/.test(i.str) && i.str.length < 30)
+          .map(i => ({ s: i.str.trim(), x: Math.round(i.x * 100) / 100, y: Math.round(i.y * 100) / 100 }));
+        const text = pageItems.filter(i => !/\d/.test(i.str) && i.str.trim().length > 1 && i.str.length < 40)
+          .map(i => ({ s: i.str.trim(), x: Math.round(i.x * 100) / 100, y: Math.round(i.y * 100) / 100 }));
+        summary[page] = { nums, text: text.slice(0, 30) };
       }
       res.json({ totalPages: Object.keys(byPage).length, pages: summary });
     } finally {
