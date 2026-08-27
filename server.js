@@ -601,61 +601,53 @@ app.post('/api/dossiers/:did/verify-ai', upload.single('file'), async (req, res)
     ).join('\n');
 
     // Build the prompt
-    const prompt = `Tu es un expert-comptable tunisien. Tu DOIS verifier ces ecritures FISC.
+    const prompt = `Tu es un expert-comptable tunisien. Tu DOIS verifier ces ecritures FISC en detail.
 
-## REGLES EXACTES DU DMI (Systeme Comptable Tunisien SCE 1996)
+## REGLES EXACTES DU DMI (SCE 1996 Tunisie)
 
-### PIECE A - Constatation globale (libelle: "DMI MM-YY", tresorerie: "CTS DMI MM-YY")
-- 457100 DEBIT = total_general (charge a payer)
-- 432100 CREDIT = retenue salaires
-- 432101 CREDIT = CSS
-- 432300 CREDIT = retenue loyers
-- 437300 CREDIT = TFP du
-- 437200 CREDIT = FOPROLOS du
-- 437500 CREDIT = timbre fiscal
-- 437400 CREDIT = TCL du
-- 436510 CREDIT = TVA resultat (balancing figure)
-- REGLE: DEBIT 457100 = SOMME de TOUS les CREDITS
+### PIECE A - Constatation globale
+- 457100 D = total_general
+- Tous les autres comptes: CREDIT
+- 432100 C = retenue salaires
+- 432101 C = CSS
+- 432300 C = retenue loyers
+- 437300 C = TFP
+- 437200 C = FOPROLOS
+- 437500 C = timbre fiscal
+- 437400 C = TCL
+- 436510 C = TVA resultat
+- VERIFIE: D = somme(C) exactement
 
-### PIECE B - TFP (libelle: "DMI MM-YY", tresorerie: "CTS TFP MM-YY")
-- 661100 DEBIT = TFP du
-- 437300 CREDIT = TFP du
-- REGLE: D=C
+### PIECE B - TFP: 661100 D = 437300 C
+### PIECE C - FOPROLOS: 661200 D = 437200 C
+### PIECE D - TCL: 661300 D = 437400 C
+- VERIFIE: chaque piece D = C
 
-### PIECE C - FOPROLOS (libelle: "DMI MM-YY", tresorerie: "CTS FOPROLOSS MM-YY")
-- 661200 DEBIT = FOPROLOS du
-- 437200 CREDIT = FOPROLOS du
-- REGLE: D=C
-
-### PIECE D - TCL (libelle: "DMI MM-YY", tresorerie: "CTS TCL MM-YY")
-- 661300 DEBIT = TCL du
-- 437400 CREDIT = TCL du
-- REGLE: D=C
-
-### PIECE E - RECLASS TVA (libelle: "RECLASS TVA", tresorerie: "RECLASS TVA")
-- 436710 DEBIT = TVA collectee
-- 436660 CREDIT = TVA deductible
-- 436670 CREDIT = TVA report precedent
-- Si signe ب (TVA due): 436510 CREDIT = TVA resultat
-- Si signe ف (TVA credit): 436670 DEBIT += TVA resultat
-- REGLE: DEBIT = CREDIT
+### PIECE E - RECLASS TVA
+- 436710 D = TVA collectee
+- 436660 C = TVA deductible
+- 436670 C = TVA report precedent
+- 436510 C = TVA resultat (si ب)
+- VERIFIE: D = C exactement
+- VERIFIE: montant 437300 piece A = montant piece B
+- VERIFIE: montant 437200 piece A = montant piece C
+- VERIFIE: montant 437400 piece A = montant piece D
 
 ## ECRITURES A VERIFIER
-N° Piece | Date | Journal | Libelle | Compte | Tresorerie | Sens=Montant
 ${ecrituresText}
 
-## VERIFICATION
-Pour CHAQUE piece, verifie:
-1. Les bons comptes sont utilises avec les bons sens (D/C)
-2. DEBIT = CREDIT (balance)
-3. Les montants sont coherents entre les pieces
+## VERIFICATION DETAILLEE
+Pour CHAQUE piece, donne des checks detailles avec les montants exactes:
+- "Piece A: D=5771.764, C=1281.564+32.727+104.413+52.206+67+366.568+3867.286=5771.764 → OK"
+- "Piece B: 661100 D=104.413 = 437300 C=104.413 → OK"
+etc.
 
-## SORTIE JSON OBLIGATOIRE
+## SORTIE JSON
 {
-  "verdict": "OK" ou "ERREUR" ou "ATTENTION",
+  "verdict": "OK"/"ERREUR"/"ATTENTION",
   "score": 0-100,
-  "checks": [{"name": "Piece A/B/C/D/E", "status": "ok" ou "error", "detail": "explication"}],
-  "summary": "Resume"
+  "checks": [{"name": "detail", "status": "ok"/"error", "detail": "montants exactes et verification"}],
+  "summary": "resume"
 }`;
 
     // Call Cloudflare Workers AI
