@@ -601,41 +601,62 @@ app.post('/api/dossiers/:did/verify-ai', upload.single('file'), async (req, res)
     ).join('\n');
 
     // Build the prompt
-    const prompt = `Tu es un expert-comptable tunisien. Verifie ces ecritures comptables generees automatiquement a partir d'un DMI (Declaration Mensuelle d'Impot) PDF.
+    const prompt = `Tu es un expert-comptable tunisien. Tu DOIS verifier ces ecritures FISC.
 
-## CONTENU DU PDF DMI (texte extrait)
-${pdfText || '(PDF non fourni - verifiez uniquement les ecritures)'}
+## REGLES EXACTES DU DMI (Systeme Comptable Tunisien SCE 1996)
 
-## ECRITURES GENEREES PAR LE PROGRAMME
+### PIECE A - Constatation globale (libelle: "DMI MM-YY", tresorerie: "CTS DMI MM-YY")
+- 457100 DEBIT = total_general (charge a payer)
+- 432100 CREDIT = retenue salaires
+- 432101 CREDIT = CSS
+- 432300 CREDIT = retenue loyers
+- 437300 CREDIT = TFP du
+- 437200 CREDIT = FOPROLOS du
+- 437500 CREDIT = timbre fiscal
+- 437400 CREDIT = TCL du
+- 436510 CREDIT = TVA resultat (balancing figure)
+- REGLE: DEBIT 457100 = SOMME de TOUS les CREDITS
+
+### PIECE B - TFP (libelle: "DMI MM-YY", tresorerie: "CTS TFP MM-YY")
+- 661100 DEBIT = TFP du
+- 437300 CREDIT = TFP du
+- REGLE: D=C
+
+### PIECE C - FOPROLOS (libelle: "DMI MM-YY", tresorerie: "CTS FOPROLOSS MM-YY")
+- 661200 DEBIT = FOPROLOS du
+- 437200 CREDIT = FOPROLOS du
+- REGLE: D=C
+
+### PIECE D - TCL (libelle: "DMI MM-YY", tresorerie: "CTS TCL MM-YY")
+- 661300 DEBIT = TCL du
+- 437400 CREDIT = TCL du
+- REGLE: D=C
+
+### PIECE E - RECLASS TVA (libelle: "RECLASS TVA", tresorerie: "RECLASS TVA")
+- 436710 DEBIT = TVA collectee
+- 436660 CREDIT = TVA deductible
+- 436670 CREDIT = TVA report precedent
+- Si signe ب (TVA due): 436510 CREDIT = TVA resultat
+- Si signe ف (TVA credit): 436670 DEBIT += TVA resultat
+- REGLE: DEBIT = CREDIT
+
+## ECRITURES A VERIFIER
 N° Piece | Date | Journal | Libelle | Compte | Tresorerie | Sens=Montant
 ${ecrituresText}
 
-## INSTRUCTIONS
-Verifie TOUTES les regles suivantes et donne un rapport detaille:
+## VERIFICATION
+Pour CHAQUE piece, verifie:
+1. Les bons comptes sont utilises avec les bons sens (D/C)
+2. DEBIT = CREDIT (balance)
+3. Les montants sont coherents entre les pieces
 
-1. **Comptes**: 457100=D, 432100/432101/432300/437300/437200/437500/437400=C (piece A), 661100/661200/661300=D (pieces B/C/D), 436710=D/436660=C/436670=C/436510=C (piece E)
-2. **Balance**: Chaque piece doit etre equilibree (D=C)
-3. **Montants**: Les montants du PDF doivent correspondre aux ecritures
-4. **Dates**: Format YYYY-MM-DD, jour=21
-5. **Tresorerie**: "CTS DMI MM-YY" pour piece A, "CTS TFP/FOPROLOSS/TCL MM-YY" pour pieces B/C/D, "RECLASS TVA" pour piece E
-6. **TVA**: La piece E doit etre equilibree (D=C). Le 436510 est la TVA resultat (ب=credit, ف=debit au 436670)
-7. **Structure**: 5 pieces (A=Constatation, B=TFP, C=FOPROLOS, D=TCL, E=RECLASS TVA)
-8. **Libelle**: "DMI MM-YY" pour pieces A-D, "RECLASS TVA" pour piece E
-
-## FORMAT DE SORTIE
-Réponds EXACTEMENT en JSON:
+## SORTIE JSON OBLIGATOIRE
 {
   "verdict": "OK" ou "ERREUR" ou "ATTENTION",
   "score": 0-100,
-  "checks": [
-    {"name": "nom du check", "status": "ok" ou "error" ou "warning", "detail": "description"}
-  ],
-  "summary": "Resume en 2-3 phrases"
-}
-
-Si tout est correct: verdict="OK", score=100.
-S'il y a des erreurs: verdict="ERREUR", score<50.
-S'il y a des avertissements: verdict="ATTENTION", score 50-99.`;
+  "checks": [{"name": "Piece A/B/C/D/E", "status": "ok" ou "error", "detail": "explication"}],
+  "summary": "Resume"
+}`;
 
     // Call Cloudflare Workers AI
     const accountId = process.env.CF_ACCOUNT_ID || '7923ab56e04f76467ba94aa508a8f018';
