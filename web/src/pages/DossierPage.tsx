@@ -21,6 +21,9 @@ export default function DossierPage() {
   const [ocrProgress, setOcrProgress] = useState('');
   const [generating, setGenerating] = useState(false);
   const [vtjcResult, setVtjcResult] = useState<any>(null);
+  const [aiReport, setAiReport] = useState<any>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiFile, setAiFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [fDate, setFDate] = useState(new Date().toISOString().split('T')[0]);
@@ -67,6 +70,20 @@ export default function DossierPage() {
       await reload(true);
     } catch (e: any) { alert('Erreur: ' + e.message + '\n\nCheck Render logs for debug info.'); console.error('FISC error full:', e); }
     finally { setUploading(false); setTimeout(() => setOcrProgress(''), 3000); }
+  };
+
+  const verifyAI = async () => {
+    if (!id || !aiFile) return;
+    setAiLoading(true);
+    setAiReport(null);
+    try {
+      const r = await api.verifyAI(id, aiFile);
+      setAiReport(r.report);
+    } catch (e: any) {
+      setAiReport({ verdict: 'ERREUR', score: 0, checks: [], summary: 'Erreur: ' + e.message });
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   const addFacture = async () => {
@@ -260,10 +277,48 @@ export default function DossierPage() {
             </div>
             {ocrProgress && <p className="text-xs text-amber-700 mb-2">{ocrProgress}</p>}
           </div>
-          <div className="flex gap-2 justify-end">
+          <div className="flex gap-2 justify-end items-center">
             <button onClick={exportCSV} disabled={!ecrituresFiltered.length} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"><Download className="w-3 h-3" /> CSV</button>
             <button onClick={exportXLSX} disabled={!ecrituresFiltered.length} className="bg-amber-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1"><FileSpreadsheet className="w-3 h-3" /> XLSX</button>
+            {!aiFile ? (
+              <label className="bg-purple-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-purple-700 cursor-pointer flex items-center gap-1">
+                <Zap className="w-3 h-3" /> Verifier IA
+                <input type="file" accept=".pdf" className="hidden" onChange={e => setAiFile(e.target.files?.[0] || null)} />
+              </label>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-purple-600">{aiFile.name}</span>
+                <button onClick={verifyAI} disabled={aiLoading} className="bg-purple-700 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-purple-800 disabled:opacity-50 flex items-center gap-1">
+                  {aiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />} {aiLoading ? 'Analyse...' : 'Lancer'}
+                </button>
+                <button onClick={() => { setAiFile(null); setAiReport(null); }} className="text-gray-400 hover:text-red-500 text-xs">X</button>
+              </div>
+            )}
           </div>
+          {aiReport && (
+            <div className={`rounded-xl border p-4 ${aiReport.verdict === 'OK' ? 'bg-green-50 border-green-200' : aiReport.verdict === 'ERREUR' ? 'bg-red-50 border-red-200' : 'bg-yellow-50 border-yellow-200'}`}>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className={`font-semibold ${aiReport.verdict === 'OK' ? 'text-green-700' : aiReport.verdict === 'ERREUR' ? 'text-red-700' : 'text-yellow-700'}`}>
+                  {aiReport.verdict === 'OK' ? 'Verification IA: OK' : aiReport.verdict === 'ERREUR' ? 'Verification IA: Erreur' : 'Verification IA: Attention'}
+                </h3>
+                <span className={`text-2xl font-bold ${aiReport.verdict === 'OK' ? 'text-green-600' : aiReport.verdict === 'ERREUR' ? 'text-red-600' : 'text-yellow-600'}`}>
+                  {aiReport.score}/100
+                </span>
+              </div>
+              <p className="text-sm mb-3">{aiReport.summary}</p>
+              {aiReport.checks?.length > 0 && (
+                <div className="space-y-1">
+                  {aiReport.checks.map((c: any, i: number) => (
+                    <div key={i} className="flex items-start gap-2 text-xs">
+                      <span>{c.status === 'ok' ? '✅' : c.status === 'error' ? '❌' : '⚠️'}</span>
+                      <span className="font-medium">{c.name}:</span>
+                      <span>{c.detail}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {ecrituresFiltered.length > 0 && (
             <div className="bg-white rounded-xl border overflow-hidden">
               <div className="overflow-x-auto">

@@ -65,4 +65,11 @@ export const api = {
     if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error + '\n\nDEBUG: ' + JSON.stringify(j.debug, null, 2)); }
     return r.json();
   },
+  verifyAI: async (did: string, file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch(`${BASE}/dossiers/${did}/verify-ai`, { method: 'POST', body: fd });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error); }
+    return r.json();
+  },
 };

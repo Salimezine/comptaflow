@@ -561,6 +561,132 @@ app.post('/api/debug/dump-pdf', upload.single('file'), async (req, res) => {
   }
 });
 
+// --- AI VERIFICATION ---
+app.post('/api/dossiers/:did/verify-ai', upload.single('file'), async (req, res) => {
+  try {
+    const did = req.params.did;
+    const d = db.prepare('SELECT * FROM dossiers WHERE id = ?').get(did);
+    if (!d) return res.status(404).json({ error: 'Dossier non trouve' });
+
+    // Get ecritures from DB
+    const ecritures = db.prepare('SELECT * FROM ecritures WHERE dossier_id = ? AND journal_code = ? ORDER BY numero_doc, compte').all(did, 'FISC');
+    if (ecritures.length === 0) return res.status(400).json({ error: 'Aucune ecriture FISC. Generez d\'abord les ecritures.' });
+
+    // Extract PDF text
+    let pdfText = '';
+    if (req.file) {
+      try {
+        const items = await extractTextItemsFromPDF(req.file.path);
+        // Group by page and format
+        const byPage = {};
+        for (const item of items) {
+          if (!byPage[item.page]) byPage[item.page] = [];
+          byPage[item.page].push(item);
+        }
+        for (const [page, pageItems] of Object.entries(byPage)) {
+          pdfText += `\n--- PAGE ${page} ---\n`;
+          pageItems.sort((a, b) => b.y - a.y || a.x - b.x);
+          for (const it of pageItems) {
+            pdfText += it.str + '\n';
+          }
+        }
+      } finally {
+        try { fs.unlinkSync(req.file.path); } catch {}
+      }
+    }
+
+    // Format ecritures for the AI
+    const ecrituresText = ecritures.map(e =>
+      `${e.numero_doc} | ${e.date_piece} | ${e.journal_code} | ${e.libelle} | ${e.compte} | ${e.tresorerie || ''} | ${e.sens}=${e.montant}`
+    ).join('\n');
+
+    // Build the prompt
+    const prompt = `Tu es un expert-comptable tunisien. Verifie ces ecritures comptables generees automatiquement a partir d'un DMI (Declaration Mensuelle d'Impot) PDF.
+
+## CONTENU DU PDF DMI (texte extrait)
+${pdfText || '(PDF non fourni - verifiez uniquement les ecritures)'}
+
+## ECRITURES GENEREES PAR LE PROGRAMME
+N° Piece | Date | Journal | Libelle | Compte | Tresorerie | Sens=Montant
+${ecrituresText}
+
+## INSTRUCTIONS
+Verifie TOUTES les regles suivantes et donne un rapport detaille:
+
+1. **Comptes**: 457100=D, 432100/432101/432300/437300/437200/437500/437400=C (piece A), 661100/661200/661300=D (pieces B/C/D), 436710=D/436660=C/436670=C/436510=C (piece E)
+2. **Balance**: Chaque piece doit etre equilibree (D=C)
+3. **Montants**: Les montants du PDF doivent correspondre aux ecritures
+4. **Dates**: Format YYYY-MM-DD, jour=21
+5. **Tresorerie**: "CTS DMI MM-YY" pour piece A, "CTS TFP/FOPROLOSS/TCL MM-YY" pour pieces B/C/D, "RECLASS TVA" pour piece E
+6. **TVA**: La piece E doit etre equilibree (D=C). Le 436510 est la TVA resultat (ب=credit, ف=debit au 436670)
+7. **Structure**: 5 pieces (A=Constatation, B=TFP, C=FOPROLOS, D=TCL, E=RECLASS TVA)
+8. **Libelle**: "DMI MM-YY" pour pieces A-D, "RECLASS TVA" pour piece E
+
+## FORMAT DE SORTIE
+Réponds EXACTEMENT en JSON:
+{
+  "verdict": "OK" ou "ERREUR" ou "ATTENTION",
+  "score": 0-100,
+  "checks": [
+    {"name": "nom du check", "status": "ok" ou "error" ou "warning", "detail": "description"}
+  ],
+  "summary": "Resume en 2-3 phrases"
+}
+
+Si tout est correct: verdict="OK", score=100.
+S'il y a des erreurs: verdict="ERREUR", score<50.
+S'il y a des avertissements: verdict="ATTENTION", score 50-99.`;
+
+    // Call Cloudflare Workers AI
+    const accountId = process.env.CF_ACCOUNT_ID || '7923ab56e04f76467ba94aa508a8f018';
+    const apiToken = process.env.CF_API_TOKEN;
+    if (!apiToken) {
+      return res.status(500).json({ error: 'CF_API_TOKEN non configure. Ajoutez la variable d\'environnement.' });
+    }
+
+    const aiResponse = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/meta/llama-3.1-8b-instruct`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: 'Tu es un expert-comptable tunisien. Reponds toujours en JSON valide.' },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 2000,
+        temperature: 0.1,
+      }),
+    });
+
+    const aiResult = await aiResponse.json();
+    if (!aiResult.success) {
+      return res.status(500).json({ error: 'Erreur AI: ' + JSON.stringify(aiResult.errors) });
+    }
+
+    // Parse AI response
+    let report;
+    try {
+      const rawText = aiResult.result?.response || aiResult.result?.text || JSON.stringify(aiResult.result);
+      // Try to extract JSON from the response
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        report = JSON.parse(jsonMatch[0]);
+      } else {
+        report = { verdict: 'ATTENTION', score: 0, checks: [], summary: rawText };
+      }
+    } catch (e) {
+      report = { verdict: 'ATTENTION', score: 0, checks: [], summary: JSON.stringify(aiResult.result) };
+    }
+
+    res.json({ ok: true, report, ecrituresCount: ecritures.length });
+  } catch (e) {
+    console.error('AI Verify error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- ECRITURES ---
 app.get('/api/dossiers/:did/ecritures', (req, res) => {
   res.json(db.prepare('SELECT * FROM ecritures WHERE dossier_id = ? ORDER BY date_operation, journal_code').all(req.params.did));
