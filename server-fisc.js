@@ -169,12 +169,13 @@ function generateFISCecritures(dmi, dossierId, societeId) {
   const entries = [];
   let numPiece = 1;
 
-  function addEntry(compte, sens, montant, tresorerie) {
+  function addEntry(compte, sens, montant, tresorerie, libOverride) {
     if (montant === 0) return;
+    const useLib = libOverride || libelle;
     entries.push({
       dossier_id: dossierId, societe_id: societeId, journal_code: journal,
       date_operation: datePiece, date_piece: datePiece,
-      numero_doc: `${libelle} P${numPiece}`, libelle,
+      numero_doc: `${useLib} P${numPiece}`, libelle: useLib,
       compte, sens, montant: Math.round(montant * 1000) / 1000, tresorerie,
     });
   }
@@ -184,24 +185,24 @@ function generateFISCecritures(dmi, dossierId, societeId) {
   }
 
   // Piece A: constatation globale
-  addEntry('457100', 'D', dmi.total_general, `CST ${libelle}`);
-  if (dmi.retenue_salaires > 0) addEntry('432100', 'C', dmi.retenue_salaires, `CST ${libelle}`);
-  if (dmi.css > 0) addEntry('432101', 'C', dmi.css, `CST ${libelle}`);
-  if (dmi.retenue_loyers > 0) addEntry('432300', 'C', dmi.retenue_loyers, `CST ${libelle}`);
-  if (dmi.retenue_marches > 0) addEntry('432400', 'C', dmi.retenue_marches, `CST ${libelle}`);
-  if (dmi.tfp_du > 0) addEntry('437300', 'C', dmi.tfp_du, `CST ${libelle}`);
-  if (dmi.foprolos_du > 0) addEntry('437200', 'C', dmi.foprolos_du, `CST ${libelle}`);
-  if (dmi.timbre_fiscal > 0) addEntry('437500', 'C', dmi.timbre_fiscal, `CST ${libelle}`);
-  if (dmi.tcl_du > 0) addEntry('437400', 'C', dmi.tcl_du, `CST ${libelle}`);
+  addEntry('457100', 'D', dmi.total_general, `CTS ${libelle}`);
+  if (dmi.retenue_salaires > 0) addEntry('432100', 'C', dmi.retenue_salaires, `CTS ${libelle}`);
+  if (dmi.css > 0) addEntry('432101', 'C', dmi.css, `CTS ${libelle}`);
+  if (dmi.retenue_loyers > 0) addEntry('432300', 'C', dmi.retenue_loyers, `CTS ${libelle}`);
+  if (dmi.retenue_marches > 0) addEntry('432400', 'C', dmi.retenue_marches, `CTS ${libelle}`);
+  if (dmi.tfp_du > 0) addEntry('437300', 'C', dmi.tfp_du, `CTS ${libelle}`);
+  if (dmi.foprolos_du > 0) addEntry('437200', 'C', dmi.foprolos_du, `CTS ${libelle}`);
+  if (dmi.timbre_fiscal > 0) addEntry('437500', 'C', dmi.timbre_fiscal, `CTS ${libelle}`);
+  if (dmi.tcl_du > 0) addEntry('437400', 'C', dmi.tcl_du, `CTS ${libelle}`);
 
   // TVA in piece A = balancing figure (total_general - sum of other credits)
   const sumC = entries.filter(e => e.numero_doc === `${libelle} P1` && e.sens === 'C')
     .reduce((s, e) => s + e.montant, 0);
   const tvaA = Math.round((dmi.total_general - sumC) * 1000) / 1000;
   if (tvaA > 0) {
-    addEntry('436510', 'C', tvaA, `CST ${libelle}`);
+    addEntry('436510', 'C', tvaA, `CTS ${libelle}`);
   } else if (tvaA < 0) {
-    addEntry('436670', 'D', Math.abs(tvaA), `CST ${libelle}`);
+    addEntry('436670', 'D', Math.abs(tvaA), `CTS ${libelle}`);
   }
 
   // Verify Piece A balance
@@ -217,19 +218,26 @@ function generateFISCecritures(dmi, dossierId, societeId) {
 
   // Piece B: TFP (661100→437300)
   if (dmi.tfp_du > 0) {
-    addEntry('661100', 'D', dmi.tfp_du, `CST TFP ${shortDate}`);
-    addEntry('437300', 'C', dmi.tfp_du, `CST TFP ${shortDate}`);
+    addEntry('661100', 'D', dmi.tfp_du, `CTS TFP ${shortDate}`);
+    addEntry('437300', 'C', dmi.tfp_du, `CTS TFP ${shortDate}`);
     numPiece++;
   }
 
   // Piece C: FOPROLOS (661200→437200)
   if (dmi.foprolos_du > 0) {
-    addEntry('661200', 'D', dmi.foprolos_du, `CST FOPROLOSS ${shortDate}`);
-    addEntry('437200', 'C', dmi.foprolos_du, `CST FOPROLOSS ${shortDate}`);
+    addEntry('661200', 'D', dmi.foprolos_du, `CTS FOPROLOSS ${shortDate}`);
+    addEntry('437200', 'C', dmi.foprolos_du, `CTS FOPROLOSS ${shortDate}`);
     numPiece++;
   }
 
-  // Piece D: RECLASS TVA (4 lines)
+  // Piece D: TCL (661300→437400)
+  if (dmi.tcl_du > 0) {
+    addEntry('661300', 'D', dmi.tcl_du, `CTS TCL ${shortDate}`);
+    addEntry('437400', 'C', dmi.tcl_du, `CTS TCL ${shortDate}`);
+    numPiece++;
+  }
+
+  // Piece E: RECLASS TVA (4 lines)
   // TVA déductible is calculated from balance equation, NOT extracted from PDF
   // ف (credit): D(collectée+resultat) = C(déductible+report) → déductible = collectée + résultat - report
   // ب (due): D(collectée) = C(déductible+report+résultat) → déductible = collectée - report - résultat
@@ -257,16 +265,9 @@ function generateFISCecritures(dmi, dossierId, societeId) {
     const totalDE = pieceDEntries.filter(e => e.sens === 'D').reduce((s, e) => s + e.montant, 0);
     const totalCE = pieceDEntries.filter(e => e.sens === 'C').reduce((s, e) => s + e.montant, 0);
     if (Math.abs(totalDE - totalCE) < 0.01) {
-      for (const e of pieceDEntries) addEntry(e.compte, e.sens, e.montant, 'RECLASS TVA');
+      for (const e of pieceDEntries) addEntry(e.compte, e.sens, e.montant, 'RECLASS TVA', 'RECLASS TVA');
       numPiece++;
     }
-  }
-
-  // Piece E: TCL (661300→437400)
-  if (dmi.tcl_du > 0) {
-    addEntry('661300', 'D', dmi.tcl_du, `CST TCL ${shortDate}`);
-    addEntry('437400', 'C', dmi.tcl_du, `CST TCL ${shortDate}`);
-    numPiece++;
   }
 
   return { entries, dmi };
