@@ -668,16 +668,36 @@ S'il y a des avertissements: verdict="ATTENTION", score 50-99.`;
     // Parse AI response
     let report;
     try {
-      const rawText = aiResult.result?.response || aiResult.result?.text || JSON.stringify(aiResult.result);
-      // Try to extract JSON from the response
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        report = JSON.parse(jsonMatch[0]);
-      } else {
-        report = { verdict: 'ATTENTION', score: 0, checks: [], summary: rawText };
+      const raw = aiResult.result?.response || aiResult.result;
+      
+      // Case 1: response is already an object with verdict/score/checks
+      if (raw && typeof raw === 'object' && raw.verdict) {
+        report = raw;
+      }
+      // Case 2: response is a string containing JSON
+      else if (typeof raw === 'string') {
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          report = JSON.parse(jsonMatch[0]);
+        } else {
+          report = { verdict: 'ATTENTION', score: 0, checks: [], summary: raw };
+        }
+      }
+      // Case 3: try choices[0].message.content
+      else if (aiResult.result?.choices?.[0]?.message?.content) {
+        const content = aiResult.result.choices[0].message.content;
+        if (typeof content === 'object' && content.verdict) {
+          report = content;
+        } else {
+          const jsonMatch = String(content).match(/\{[\s\S]*\}/);
+          report = jsonMatch ? JSON.parse(jsonMatch[0]) : { verdict: 'ATTENTION', score: 0, checks: [], summary: String(content) };
+        }
+      }
+      else {
+        report = { verdict: 'ATTENTION', score: 0, checks: [], summary: JSON.stringify(aiResult.result) };
       }
     } catch (e) {
-      report = { verdict: 'ATTENTION', score: 0, checks: [], summary: JSON.stringify(aiResult.result) };
+      report = { verdict: 'ATTENTION', score: 0, checks: [], summary: 'Parse error: ' + e.message };
     }
 
     res.json({ ok: true, report, ecrituresCount: ecritures.length });
