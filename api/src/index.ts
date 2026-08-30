@@ -514,7 +514,7 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
       if (path === '/api/baud/societes' && method === 'POST') {
         const b = await request.json() as any;
         const id = genId();
-        await env.DB.prepare('INSERT INTO societes_paie (id, nom, matricule_fiscal, activite) VALUES (?, ?, ?, ?)').bind(id, b.nom, b.matricule_fiscal || null, b.activite || null).run();
+        await env.DB.prepare('INSERT INTO societes_paie (id, nom, matricule_fiscal, activite, forme_juridique) VALUES (?, ?, ?, ?, ?)').bind(id, b.nom, b.matricule_fiscal || null, b.activite || null, b.forme_juridique || null).run();
         return json({ id, ...b });
       }
       const delBaudSocMatch = path.match(/^\/api\/baud\/societes\/([^/]+)$/);
@@ -527,7 +527,7 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         const fields: string[] = [];
         const values: unknown[] = [];
         for (const [k, v] of Object.entries(b)) {
-          if (['nom', 'matricule_fiscal', 'activite', 'sage_code_dossier', 'navette_format_notes'].includes(k)) {
+          if (['nom', 'matricule_fiscal', 'activite', 'forme_juridique', 'sage_code_dossier', 'navette_format_notes'].includes(k)) {
             fields.push(`${k} = ?`);
             values.push(v);
           }

@@ -9,6 +9,7 @@ export default function BaudSocietes() {
   const [dossiers, setDossiers] = useState<any[]>([]);
   const [showNew, setShowNew] = useState(false);
   const [nom, setNom] = useState('');
+  const [formeJuridique, setFormeJuridique] = useState('SARL');
   const [newMois, setNewMois] = useState(new Date().getMonth() + 1);
   const [newAnnee, setNewAnnee] = useState(new Date().getFullYear());
 
@@ -17,9 +18,9 @@ export default function BaudSocietes() {
 
   const createSociete = async () => {
     if (!nom.trim()) return;
-    const s = await api.baud.createSociete({ nom: nom.trim() });
+    const s = await api.baud.createSociete({ nom: nom.trim(), forme_juridique: formeJuridique });
     setSocietes([...societes, s]);
-    setNom(''); setShowNew(false);
+    setNom(''); setFormeJuridique('SARL'); setShowNew(false);
   };
 
   const createDossier = async () => {
@@ -48,7 +49,20 @@ export default function BaudSocietes() {
 
       {showNew && (
         <div className="bg-white border rounded-lg p-4 space-y-3">
-          <input placeholder="Nom de la societe" value={nom} onChange={e => setNom(e.target.value)} className="w-full border rounded px-3 py-2 text-sm" />
+          <div className="grid grid-cols-2 gap-3">
+            <input placeholder="Nom de la societe" value={nom} onChange={e => setNom(e.target.value)} className="border rounded px-3 py-2 text-sm" />
+            <select value={formeJuridique} onChange={e => setFormeJuridique(e.target.value)} className="border rounded px-3 py-2 text-sm">
+              <option value="SARL">SARL</option>
+              <option value="SA">SA</option>
+              <option value="SNC">SNC</option>
+              <option value="SAS">SAS</option>
+              <option value="SASU">SASU</option>
+              <option value="SUARL">SUARL</option>
+              <option value="GIE">GIE</option>
+              <option value="AUTO">Auto-entrepreneur</option>
+              <option value="OTHER">Autre</option>
+            </select>
+          </div>
           <button onClick={createSociete} className="px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700">Creer</button>
         </div>
       )}
@@ -76,7 +90,10 @@ export default function BaudSocietes() {
           {selected && (
             <>
               <div className="bg-white border rounded-lg p-4">
-                <h3 className="font-medium mb-1">{selected.nom}</h3>
+                <div className="flex items-center gap-3 mb-1">
+                  <h3 className="font-medium">{selected.nom}</h3>
+                  <span className="px-2 py-0.5 rounded text-xs bg-purple-100 text-purple-700">{selected.forme_juridique || '—'}</span>
+                </div>
                 <p className="text-xs text-gray-400">Les salaries et rubriques sont extraites automatiquement lors de l'upload de la fiche navette.</p>
               </div>
 
