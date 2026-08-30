@@ -502,6 +502,272 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         return json({ ok: true, report, ecrituresCount: ecrituresR.results.length });
       }
 
+      // ============================================================
+      // BAUD — PAYROLL AUTOMATION
+      // ============================================================
+
+      // --- BAUD: SOCIETES PAIE ---
+      if (path === '/api/baud/societes' && method === 'GET') {
+        const r = await env.DB.prepare('SELECT * FROM societes_paie ORDER BY nom').all();
+        return json(r.results);
+      }
+      if (path === '/api/baud/societes' && method === 'POST') {
+        const b = await request.json() as any;
+        const id = genId();
+        await env.DB.prepare('INSERT INTO societes_paie (id, nom, matricule_fiscal, activite) VALUES (?, ?, ?, ?)').bind(id, b.nom, b.matricule_fiscal || null, b.activite || null).run();
+        return json({ id, ...b });
+      }
+      const delBaudSocMatch = path.match(/^\/api\/baud\/societes\/([^/]+)$/);
+      if (delBaudSocMatch && method === 'DELETE') {
+        await env.DB.prepare('DELETE FROM societes_paie WHERE id = ?').bind(delBaudSocMatch[1]).run();
+        return json({ ok: true });
+      }
+      if (delBaudSocMatch && method === 'PUT') {
+        const b = await request.json() as any;
+        const fields: string[] = [];
+        const values: unknown[] = [];
+        for (const [k, v] of Object.entries(b)) {
+          if (['nom', 'matricule_fiscal', 'activite', 'sage_code_dossier', 'navette_format_notes'].includes(k)) {
+            fields.push(`${k} = ?`);
+            values.push(v);
+          }
+        }
+        if (fields.length === 0) return json({ error: 'Aucun champ' });
+        values.push(delBaudSocMatch[1]);
+        await env.DB.prepare(`UPDATE societes_paie SET ${fields.join(', ')}, updated_at = datetime('now') WHERE id = ?`).bind(...values).run();
+        return await env.DB.prepare('SELECT * FROM societes_paie WHERE id = ?').bind(delBaudSocMatch[1]).first();
+      }
+
+      // --- BAUD: SALARIES ---
+      const baudSalMatch = path.match(/^\/api\/baud\/societes\/([^/]+)\/salaries$/);
+      if (baudSalMatch && method === 'GET') {
+        const r = await env.DB.prepare('SELECT * FROM salaries_paie WHERE societe_id = ? ORDER BY matricule').bind(baudSalMatch[1]).all();
+        return json(r.results);
+      }
+      if (baudSalMatch && method === 'POST') {
+        const b = await request.json() as any;
+        const id = genId();
+        await env.DB.prepare('INSERT INTO salaries_paie (id, societe_id, matricule, nom, prenom, civilite, date_naissance, date_embauche, poste, type_contrat) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, baudSalMatch[1], b.matricule, b.nom, b.prenom || null, b.civilite || null, b.date_naissance || null, b.date_embauche || null, b.poste || null, b.type_contrat || null).run();
+        return json({ id, ...b });
+      }
+      const baudSalUpdateMatch = path.match(/^\/api\/baud\/salaries\/([^/]+)$/);
+      if (baudSalUpdateMatch && method === 'PUT') {
+        const b = await request.json() as any;
+        const fields: string[] = [];
+        const values: unknown[] = [];
+        for (const [k, v] of Object.entries(b)) {
+          if (['matricule', 'nom', 'prenom', 'civilite', 'date_naissance', 'date_embauche', 'poste', 'type_contrat', 'statut'].includes(k)) {
+            fields.push(`${k} = ?`);
+            values.push(v);
+          }
+        }
+        if (fields.length === 0) return json({ error: 'Aucun champ' });
+        values.push(baudSalUpdateMatch[1]);
+        await env.DB.prepare(`UPDATE salaries_paie SET ${fields.join(', ')}, updated_at = datetime('now') WHERE id = ?`).bind(...values).run();
+        return await env.DB.prepare('SELECT * FROM salaries_paie WHERE id = ?').bind(baudSalUpdateMatch[1]).first();
+      }
+
+      // --- BAUD: RUBRIQUES ---
+      const baudRubMatch = path.match(/^\/api\/baud\/societes\/([^/]+)\/rubriques$/);
+      if (baudRubMatch && method === 'GET') {
+        const r = await env.DB.prepare('SELECT * FROM rubriques_paie WHERE societe_id = ? AND actif = 1 ORDER BY ordre, code').bind(baudRubMatch[1]).all();
+        return json(r.results);
+      }
+      if (baudRubMatch && method === 'POST') {
+        const b = await request.json() as any;
+        const id = genId();
+        await env.DB.prepare('INSERT OR REPLACE INTO rubriques_paie (id, societe_id, code, libelle, type, zone, navette_aliases, valeur_defaut, ordre) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, baudRubMatch[1], b.code, b.libelle, b.type || 'rubrique', b.zone || '0', b.navette_aliases || null, b.valeur_defaut || null, b.ordre || 0).run();
+        return json({ id, ...b });
+      }
+
+      // --- BAUD: DOSSIERS PAIE ---
+      const baudDossiersListMatch = path.match(/^\/api\/baud\/societes\/([^/]+)\/dossiers$/);
+      if (baudDossiersListMatch && method === 'GET') {
+        const r = await env.DB.prepare('SELECT * FROM dossiers_paie WHERE societe_id = ? ORDER BY annee DESC, mois DESC').bind(baudDossiersListMatch[1]).all();
+        return json(r.results);
+      }
+      if (baudDossiersListMatch && method === 'POST') {
+        const b = await request.json() as any;
+        const id = genId();
+        await env.DB.prepare('INSERT INTO dossiers_paie (id, societe_id, mois, annee) VALUES (?, ?, ?, ?)').bind(id, baudDossiersListMatch[1], b.mois, b.annee).run();
+        return json({ id, mois: b.mois, annee: b.annee, statut: 'brouillon' });
+      }
+      const baudDossierGetMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)$/);
+      if (baudDossierGetMatch && method === 'GET') {
+        const d = await env.DB.prepare('SELECT * FROM dossiers_paie WHERE id = ?').bind(baudDossierGetMatch[1]).first();
+        return d ? json(d) : json({ error: 'Non trouve' }, 404);
+      }
+
+      // --- BAUD: UPLOAD FICHE NAVETTE ---
+      const baudUploadMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)\/upload$/);
+      if (baudUploadMatch && method === 'POST') {
+        const did = baudUploadMatch[1];
+        const dossier = await env.DB.prepare('SELECT * FROM dossiers_paie WHERE id = ?').bind(did).first();
+        if (!dossier) return json({ error: 'Dossier non trouve' }, 404);
+        const b = await request.json() as any;
+        const { filename, lignes } = b;
+        if (!filename || !lignes) return json({ error: 'filename et lignes requis' }, 400);
+        await env.DB.prepare("UPDATE dossiers_paie SET fichier_navette_nom = ?, statut = 'brouillon', extraction_json = ?, updated_at = datetime('now') WHERE id = ?").bind(filename, JSON.stringify({ lignes }), did).run();
+        return json({ ok: true, fichier_nom: filename, lignes_count: lignes.length });
+      }
+
+      // --- BAUD: EXTRACT (via IA) ---
+      const baudExtractMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)\/extract$/);
+      if (baudExtractMatch && method === 'POST') {
+        const did = baudExtractMatch[1];
+        const dossier = await env.DB.prepare('SELECT * FROM dossiers_paie WHERE id = ?').bind(did).first() as any;
+        if (!dossier) return json({ error: 'Dossier non trouve' }, 404);
+        const extractionJson = dossier.extraction_json ? JSON.parse(dossier.extraction_json) : null;
+        if (!extractionJson?.lignes) return json({ error: 'Upload d\'abord' }, 400);
+
+        await env.DB.prepare("UPDATE dossiers_paie SET statut = 'extraction', updated_at = datetime('now') WHERE id = ?").bind(did).run();
+
+        try {
+          const rubriques = await env.DB.prepare('SELECT * FROM rubriques_paie WHERE societe_id = ? AND actif = 1').bind(dossier.societe_id).all();
+          const salaries = await env.DB.prepare('SELECT * FROM salaries_paie WHERE societe_id = ?').bind(dossier.societe_id).all();
+          const lignes = extractionJson.lignes || [];
+
+          const insertLigne = env.DB.prepare('INSERT INTO lignes_extraites (id, dossier_id, salary_id, matricule, nom_prenom, type_ligne, champs, rubrique_code, zone, valeur, source_feuille, source_plage, confiance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+          const batch: D1PreparedStatement[] = [];
+          for (const ligne of lignes) {
+            const salaryMatch = ligne.matricule ? (salaries.results as any[]).find(s => s.matricule === ligne.matricule) : null;
+            batch.push(insertLigne.bind(genId(), did, salaryMatch?.id || null, ligne.matricule || null, ligne.nom_prenom || null, ligne.type_ligne || 'variable', JSON.stringify(ligne.champs || {}), ligne.rubrique_code || null, ligne.zone || null, ligne.valeur || null, ligne.source_feuille || null, ligne.source_plage || null, ligne.confiance || null));
+          }
+          if (batch.length > 0) await env.DB.batch(batch);
+
+          await env.DB.prepare("UPDATE dossiers_paie SET statut = 'controle', extraction_confiance = ?, updated_at = datetime('now') WHERE id = ?").bind(extractionJson.confiance || 0, did).run();
+          return json({ ok: true, lignes_count: lignes.length, confiance: extractionJson.confiance || 0 });
+        } catch (e: any) {
+          await env.DB.prepare("UPDATE dossiers_paie SET statut = 'brouillon', extraction_log = ?, updated_at = datetime('now') WHERE id = ?").bind(e.message, did).run();
+          return json({ error: 'Extraction echouee: ' + e.message }, 500);
+        }
+      }
+
+      // --- BAUD: LIGNES ---
+      const baudLignesMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)\/lignes$/);
+      if (baudLignesMatch && method === 'GET') {
+        const r = await env.DB.prepare('SELECT * FROM lignes_extraites WHERE dossier_id = ? ORDER BY created_at').bind(baudLignesMatch[1]).all();
+        return json(r.results);
+      }
+      const baudLigneUpdateMatch = path.match(/^\/api\/baud\/lignes\/([^/]+)$/);
+      if (baudLigneUpdateMatch && method === 'PUT') {
+        const b = await request.json() as any;
+        const fields: string[] = [];
+        const values: unknown[] = [];
+        for (const [k, v] of Object.entries(b)) {
+          if (['statut', 'matricule', 'rubrique_code', 'zone', 'valeur', 'champs'].includes(k)) {
+            fields.push(`${k} = ?`);
+            values.push(k === 'champs' ? JSON.stringify(v) : v);
+          }
+        }
+        if (fields.length === 0) return json({ error: 'Aucun champ' });
+        values.push(baudLigneUpdateMatch[1]);
+        await env.DB.prepare(`UPDATE lignes_extraites SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
+        return await env.DB.prepare('SELECT * FROM lignes_extraites WHERE id = ?').bind(baudLigneUpdateMatch[1]).first();
+      }
+
+      // --- BAUD: VALIDER ---
+      const baudValiderMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)\/valider$/);
+      if (baudValiderMatch && method === 'POST') {
+        await env.DB.prepare("UPDATE dossiers_paie SET statut = 'valide', updated_at = datetime('now') WHERE id = ?").bind(baudValiderMatch[1]).run();
+        return json({ ok: true });
+      }
+
+      // --- BAUD: EXPORT GA (generate XLSX as base64) ---
+      const baudExportMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)\/export$/);
+      if (baudExportMatch && method === 'POST') {
+        const did = baudExportMatch[1];
+        const dossier = await env.DB.prepare('SELECT * FROM dossiers_paie WHERE id = ?').bind(did).first() as any;
+        if (!dossier) return json({ error: 'Dossier non trouve' }, 404);
+
+        const lignesR = await env.DB.prepare('SELECT * FROM lignes_extraites WHERE dossier_id = ? AND statut != ? ORDER BY matricule, rubrique_code').bind(did, 'ignore').all();
+        if (!lignesR.results.length) return json({ error: 'Aucune ligne valide' }, 400);
+
+        const salariesR = await env.DB.prepare('SELECT * FROM salaries_paie WHERE societe_id = ?').bind(dossier.societe_id).all();
+        const rubriquesR = await env.DB.prepare('SELECT * FROM rubriques_paie WHERE societe_id = ? AND actif = 1').bind(dossier.societe_id).all();
+        const rubMap: Record<string, any> = {};
+        for (const r of rubriquesR.results) rubMap[r.code as string] = r;
+
+        // Build Import Salariés rows
+        const salRows: any[][] = [['Matricule', 'Nom', 'Prénom', 'Civilité', 'Date de naissance', 'Date d\'embauche', 'Poste', 'Type de contrat']];
+        const seen = new Set<string>();
+        for (const l of lignesR.results) {
+          const mat = l.matricule as string;
+          if (!mat || seen.has(mat)) continue;
+          seen.add(mat);
+          const sal = (salariesR.results as any[]).find(s => s.matricule === mat);
+          salRows.push([
+            mat, sal?.nom || '', sal?.prenom || '', sal?.civilite || '',
+            sal?.date_naissance || '', sal?.date_embauche || '', sal?.poste || '', sal?.type_contrat || ''
+          ]);
+        }
+
+        // Build Import Variables rows
+        const varRows: any[][] = [['Matricule', 'Rubrique ou Constante', 'Zone', 'Valeur']];
+        for (const l of lignesR.results) {
+          const rub = rubMap[l.rubrique_code as string];
+          const zone = l.zone || rub?.zone || '0';
+          varRows.push([l.matricule || '', l.rubrique_code || '', String(zone), l.valeur != null ? String(l.valeur) : '']);
+        }
+
+        // Generate XLSX as base64 using dynamic import
+        let salB64 = '', varB64 = '';
+        try {
+          const XLSXMod = await import('xlsx');
+          const XLSX = XLSXMod.default || XLSXMod;
+
+          const salWb = XLSX.utils.book_new();
+          const salWs = XLSX.utils.aoa_to_sheet(salRows);
+          XLSX.utils.book_append_sheet(salWb, salWs, 'Salariés');
+          salB64 = XLSX.write(salWb, { type: 'base64', bookType: 'xlsx' });
+
+          const varWb = XLSX.utils.book_new();
+          const varWs = XLSX.utils.aoa_to_sheet(varRows);
+          XLSX.utils.book_append_sheet(varWb, varWs, 'Variables');
+          varB64 = XLSX.write(varWb, { type: 'base64', bookType: 'xlsx' });
+        } catch {
+          return json({ error: 'xlsx non disponible' }, 500);
+        }
+
+        const moisStr = String(dossier.mois).padStart(2, '0');
+        const annStr = String(dossier.annee).slice(-2);
+        const salName = `ImportSalariés_${moisStr}-${annStr}.xlsx`;
+        const varName = `ImportVariables_${moisStr}-${annStr}.xlsx`;
+
+        // Store exports
+        const salId = genId(), varId = genId();
+        await env.DB.prepare('INSERT INTO imports_ga (id, dossier_id, type_import, fichier_nom, fichier_base64, nb_lignes) VALUES (?, ?, ?, ?, ?, ?)').bind(salId, did, 'salaries', salName, salB64, salRows.length - 1).run();
+        await env.DB.prepare('INSERT INTO imports_ga (id, dossier_id, type_import, fichier_nom, fichier_base64, nb_lignes) VALUES (?, ?, ?, ?, ?, ?)').bind(varId, did, 'variables', varName, varB64, varRows.length - 1).run();
+
+        return json({ ok: true, exports: [
+          { id: salId, type: 'salaries', fichier_nom: salName, nb_lignes: salRows.length - 1 },
+          { id: varId, type: 'variables', fichier_nom: varName, nb_lignes: varRows.length - 1 },
+        ]});
+      }
+
+      // --- BAUD: LIST EXPORTS ---
+      const baudExportsListMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)\/exports$/);
+      if (baudExportsListMatch && method === 'GET') {
+        const r = await env.DB.prepare('SELECT id, type_import, fichier_nom, nb_lignes, statut, created_at FROM imports_ga WHERE dossier_id = ? ORDER BY created_at').bind(baudExportsListMatch[1]).all();
+        return json(r.results);
+      }
+
+      // --- BAUD: DOWNLOAD EXPORT ---
+      const baudDownloadMatch = path.match(/^\/api\/baud\/exports\/([^/]+)\/download$/);
+      if (baudDownloadMatch && method === 'GET') {
+        const exp = await env.DB.prepare('SELECT * FROM imports_ga WHERE id = ?').bind(baudDownloadMatch[1]).first() as any;
+        if (!exp) return json({ error: 'Export non trouve' }, 404);
+        const b64 = exp.fichier_base64 as string;
+        const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        return new Response(bin, {
+          headers: {
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition': `attachment; filename="${exp.fichier_nom}"`,
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+      }
+
       return json({ error: 'Not found: ' + path }, 404);
     } catch (e: any) {
       return json({ error: e.message || 'Internal error' }, 500);

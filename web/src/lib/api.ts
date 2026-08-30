@@ -40,4 +40,32 @@ export const api = {
   processFISC: (did: string, dmi: any) => req<any>(`/dossiers/${did}/process-fisc`, { method: 'POST', body: JSON.stringify({ dmi }) }),
 
   verifyAI: (did: string) => req<any>(`/dossiers/${did}/verify-ai`, { method: 'POST', body: '{}' }),
+
+  // --- BAUD ---
+  baud: {
+    getSocietes: () => req<any[]>('/baud/societes'),
+    createSociete: (d: any) => req<any>('/baud/societes', { method: 'POST', body: JSON.stringify(d) }),
+    deleteSociete: (id: string) => req<any>(`/baud/societes/${id}`, { method: 'DELETE' }),
+    updateSociete: (id: string, d: any) => req<any>(`/baud/societes/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+    getSalaries: (sid: string) => req<any[]>(`/baud/societes/${sid}/salaries`),
+    createSalary: (sid: string, d: any) => req<any>(`/baud/societes/${sid}/salaries`, { method: 'POST', body: JSON.stringify(d) }),
+    updateSalary: (id: string, d: any) => req<any>(`/baud/salaries/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+    getRubriques: (sid: string) => req<any[]>(`/baud/societes/${sid}/rubriques`),
+    upsertRubrique: (sid: string, d: any) => req<any>(`/baud/societes/${sid}/rubriques`, { method: 'POST', body: JSON.stringify(d) }),
+    getDossiers: (sid: string) => req<any[]>(`/baud/societes/${sid}/dossiers`),
+    createDossier: (sid: string, d: any) => req<any>(`/baud/societes/${sid}/dossiers`, { method: 'POST', body: JSON.stringify(d) }),
+    getDossier: (did: string) => req<any>(`/baud/dossiers/${did}`),
+    upload: (did: string, filename: string, lignes: any[]) => req<any>(`/baud/dossiers/${did}/upload`, { method: 'POST', body: JSON.stringify({ filename, lignes }) }),
+    extract: (did: string) => req<any>(`/baud/dossiers/${did}/extract`, { method: 'POST' }),
+    getLignes: (did: string) => req<any[]>(`/baud/dossiers/${did}/lignes`),
+    updateLigne: (id: string, d: any) => req<any>(`/baud/lignes/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+    valider: (did: string) => req<any>(`/baud/dossiers/${did}/valider`, { method: 'POST' }),
+    exportGA: (did: string) => req<any>(`/baud/dossiers/${did}/export`, { method: 'POST' }),
+    getExports: (did: string) => req<any[]>(`/baud/dossiers/${did}/exports`),
+    downloadExport: async (eid: string) => {
+      const r = await fetch(`${BASE}/baud/exports/${eid}/download`);
+      if (!r.ok) throw new Error('Download failed');
+      return r.blob();
+    },
+  },
 };
