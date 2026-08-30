@@ -1,8 +1,59 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Upload, Plus, Trash2, Download, ArrowLeft, FileText, Zap, Loader2, AlertTriangle, FileSpreadsheet } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { api } from '../lib/api';
+import { extractTextFromPDF, extractTextItemsFromPDF } from '../lib/pdf';
+import { parseDMIItems, validateFISC } from '../lib/fisc';
+
+let XLSXModule: typeof import('xlsx') | null = null;
+async function loadXLSX() {
+  if (!XLSXModule) XLSXModule = await import('xlsx');
+  return XLSXModule;
+}
+
+function parseInvoice(text: string) {
+  let numero = '';
+  let m = text.match(/FACTURE\s*N[°o]?\s*:\s*(\d{4})\s*\/\s*(\d+)/);
+  if (m) numero = m[1] + '/' + m[2];
+
+  let date = '';
+  m = text.match(/LE\s*:\s*(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) date = m[3] + '-' + m[2] + '-' + m[1];
+
+  let client = '';
+  m = text.match(/(?<!Code )Client\s*:\s*(.+?)(?:\n|$)/);
+  if (m) {
+    const c = m[1].trim();
+    client = c.toUpperCase().includes('PASSAGERS') ? 'CLIENTS PASSAGERS' : c;
+  }
+
+  let ht0 = 0, ht19 = 0, tva19 = 0, ttc = 0, timbre = 1.0;
+  const lines = text.split('\n');
+
+  for (const line of lines) {
+    if (ht0 === 0) {
+      m = line.match(/^([\d][\d ,.]+?)\s+0%\s/);
+      if (m) { try { ht0 = parseFloat(m[1].trim().replace(/ /g, '').replace(',', '.')); } catch {} }
+    }
+    if (ht19 === 0) {
+      m = line.match(/^([\d][\d ,.]+?)\s+19%\s+([\d ,.]+)/);
+      if (m) {
+        try { ht19 = parseFloat(m[1].trim().replace(/ /g, '').replace(',', '.')); } catch {}
+        try { tva19 = parseFloat(m[2].trim().replace(/ /g, '').replace(',', '.')); } catch {}
+      }
+    }
+    if (timbre === 1.0) {
+      m = line.match(/TIMBRE\s+FIS\.\s*:\s*([\d ,.]+)/);
+      if (m) { try { timbre = parseFloat(m[1].trim().replace(/ /g, '').replace(',', '.')); } catch {} }
+    }
+    if (ttc === 0) {
+      m = line.match(/NET\s+T\.T\.C\.\s*([\d ,.]+)/);
+      if (m) { try { ttc = parseFloat(m[1].trim().replace(/ /g, '').replace(',', '.')); } catch {} }
+    }
+  }
+
+  return { date, numero, client, ht0, ht19, tva19, timbre, ttc };
+}
 
 export default function DossierPage() {
   const { id } = useParams<{ id: string }>();
@@ -23,7 +74,6 @@ export default function DossierPage() {
   const [vtjcResult, setVtjcResult] = useState<any>(null);
   const [aiReport, setAiReport] = useState<any>(null);
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiFile, setAiFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [fDate, setFDate] = useState(new Date().toISOString().split('T')[0]);
@@ -52,32 +102,56 @@ export default function DossierPage() {
   const handleUpload = async (files: FileList | null) => {
     if (!files?.length || !id) return;
     setUploading(true);
-    setOcrProgress('Traitement de ' + files.length + ' fichier(s)...');
+    setOcrProgress('Extraction PDF côté navigateur...');
     try {
       if (journal === 'VT J.C') {
-        const result = await api.process(id, Array.from(files));
-        const ok = result.results.filter((r: any) => r.ok).length;
+        // Client-side: extract factures from each PDF
+        let ok = 0;
+        for (const file of Array.from(files)) {
+          const text = await extractTextFromPDF(file);
+          // Parse invoice from text (client-side)
+          const inv = parseInvoice(text);
+          if (!inv.numero) inv.numero = file.name.replace(/[^0-9]/g, '');
+          await api.addFacture(id, { date_facture: inv.date, numero_facture: inv.numero, client: inv.client, total_ht_0: inv.ht0, total_ht_19: inv.ht19, tva_19: inv.tva19, timbre: inv.timbre, total_ttc: inv.ttc });
+          ok++;
+        }
         setOcrProgress(ok + ' facture(s) extraite(s). Generation VT J.C...');
         await api.generateVTJC(id);
         setOcrProgress('Termine! ' + ok + ' facture(s) + ecritures generees');
       } else if (journal === 'VT C') {
-        const r = await api.processVTC(id, Array.from(files));
+        // Client-side: extract text, send to Worker
+        let allText = '';
+        for (const file of Array.from(files)) {
+          const text = await extractTextFromPDF(file);
+          allText += text + '\n';
+        }
+        setOcrProgress('Envoi au serveur pour traitement...');
+        const r = await api.processVTC(id, allText);
         setOcrProgress('Termine! ' + r.totalEntries + ' ecriture(s) VT C extraite(s)');
       } else if (journal === 'FISC') {
-        const r = await api.processFISC(id, files[0]);
+        // Client-side: extract items, parse DMI, validate, send to Worker
+        setOcrProgress('Extraction DMI...');
+        const items = await extractTextItemsFromPDF(files[0]);
+        const dmi = parseDMIItems(items);
+        const validation = validateFISC(dmi);
+        if (!validation.ok) {
+          setOcrProgress('Attention: ' + validation.errors.join(', '));
+        }
+        setOcrProgress('Envoi DMI au serveur...');
+        const r = await api.processFISC(id, dmi);
         setOcrProgress('Termine! ' + r.entriesCount + ' ecriture(s) FISC generee(s)');
       }
       await reload(true);
-    } catch (e: any) { alert('Erreur: ' + e.message + '\n\nCheck Render logs for debug info.'); console.error('FISC error full:', e); }
+    } catch (e: any) { alert('Erreur: ' + e.message); console.error('Error:', e); }
     finally { setUploading(false); setTimeout(() => setOcrProgress(''), 3000); }
   };
 
   const verifyAI = async () => {
-    if (!id || !aiFile) return;
+    if (!id) return;
     setAiLoading(true);
     setAiReport(null);
     try {
-      const r = await api.verifyAI(id, aiFile);
+      const r = await api.verifyAI(id);
       setAiReport(r.report);
     } catch (e: any) {
       setAiReport({ verdict: 'ERREUR', score: 0, checks: [], summary: 'Erreur: ' + e.message });
@@ -121,9 +195,34 @@ export default function DossierPage() {
 
   const handleRapport = async (files: FileList | null) => {
     if (!files?.[0] || !id) return;
-    try { const r = await api.uploadRapport(id, files[0]); alert('Rapport importe: ' + r.count + ' jour(s)'); reload(); } catch (e: any) { alert('Erreur rapport: ' + e.message); }
+    try {
+      setOcrProgress('Extraction rapport...');
+      const text = await extractTextFromPDF(files[0]);
+      const modes = parseRapport(text);
+      if (!Object.keys(modes).length) { alert('Aucune ligne detectee'); return; }
+      const rows = Object.entries(modes).map(([date, v]) => ({ date_jour: date, ...v }));
+      const r = await api.uploadRapport(id, rows);
+      alert('Rapport importe: ' + r.count + ' jour(s)');
+      reload();
+    } catch (e: any) { alert('Erreur rapport: ' + e.message); }
     if (rapportRef.current) rapportRef.current.value = '';
+    setTimeout(() => setOcrProgress(''), 3000);
   };
+
+  function parseRapport(text: string) {
+    const modes: Record<string, any> = {};
+    const p = (s: string) => parseFloat(s.replace(/ /g, '').replace(',', '.')) || 0;
+    const num = '\\d[\\d ]*\\d,\\d+|\\d,\\d+';
+    const sep = '\\s*[|]?\\s*';
+    const re = new RegExp('(\\d{2})\\/(\\d{2})\\/(\\d{4})' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')' + sep + '(' + num + ')');
+    for (const line of text.split('\n')) {
+      const m = line.match(re);
+      if (!m) continue;
+      const date = m[3] + '-' + m[2] + '-' + m[1];
+      modes[date] = { especes: p(m[4]), cheques: p(m[5]), tpe: p(m[6]), bonsAchat: p(m[7]), avoir: p(m[8]), credit: p(m[9]) };
+    }
+    return modes;
+  }
   const delRapport = async () => { if (!id || !confirm('Supprimer rapport?')) return; await api.deleteRapport(id); reload(); };
 
   const loadAnalyse = async () => {
@@ -143,8 +242,9 @@ export default function DossierPage() {
     URL.revokeObjectURL(url);
   };
 
-  const exportXLSX = () => {
+  const exportXLSX = async () => {
     if (!id) return;
+    const XLSX = await loadXLSX();
     const data = ecrituresFiltered.sort((a, b) => (a.date_operation || '').localeCompare(b.date_operation || ''));
 
     const ACCOUNT_LABELS: Record<string, string> = {
@@ -219,9 +319,9 @@ export default function DossierPage() {
             </div>
           </div>
           <div className="flex gap-2 justify-center">
-            {ecrituresVTJC.length > 0 && <button onClick={() => { setJournal('VT J.C'); setTimeout(exportXLSX, 0); }} className="bg-violet-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-violet-700 flex items-center gap-1.5"><FileSpreadsheet className="w-4 h-4" /> XLSX VT J.C</button>}
-            {ecrituresVTC.length > 0 && <button onClick={() => { setJournal('VT C'); setTimeout(exportXLSX, 0); }} className="bg-teal-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-700 flex items-center gap-1.5"><FileSpreadsheet className="w-4 h-4" /> XLSX VT C</button>}
-            {ecrituresFISC.length > 0 && <button onClick={() => { setJournal('FISC'); setTimeout(exportXLSX, 0); }} className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 flex items-center gap-1.5"><FileSpreadsheet className="w-4 h-4" /> XLSX FISC</button>}
+            {ecrituresVTJC.length > 0 && <button onClick={() => { setJournal('VT J.C'); exportXLSX(); }} className="bg-violet-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-violet-700 flex items-center gap-1.5"><FileSpreadsheet className="w-4 h-4" /> XLSX VT J.C</button>}
+            {ecrituresVTC.length > 0 && <button onClick={() => { setJournal('VT C'); exportXLSX(); }} className="bg-teal-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-700 flex items-center gap-1.5"><FileSpreadsheet className="w-4 h-4" /> XLSX VT C</button>}
+            {ecrituresFISC.length > 0 && <button onClick={() => { setJournal('FISC'); exportXLSX(); }} className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 flex items-center gap-1.5"><FileSpreadsheet className="w-4 h-4" /> XLSX FISC</button>}
           </div>
         </div>
       </div>
@@ -280,20 +380,9 @@ export default function DossierPage() {
           <div className="flex gap-2 justify-end items-center">
             <button onClick={exportCSV} disabled={!ecrituresFiltered.length} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"><Download className="w-3 h-3" /> CSV</button>
             <button onClick={exportXLSX} disabled={!ecrituresFiltered.length} className="bg-amber-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1"><FileSpreadsheet className="w-3 h-3" /> XLSX</button>
-            {!aiFile ? (
-              <label className="bg-purple-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-purple-700 cursor-pointer flex items-center gap-1">
-                <Zap className="w-3 h-3" /> Verifier IA
-                <input type="file" accept=".pdf" className="hidden" onChange={e => setAiFile(e.target.files?.[0] || null)} />
-              </label>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-purple-600">{aiFile.name}</span>
-                <button onClick={verifyAI} disabled={aiLoading} className="bg-purple-700 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-purple-800 disabled:opacity-50 flex items-center gap-1">
-                  {aiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />} {aiLoading ? 'Analyse...' : 'Lancer'}
-                </button>
-                <button onClick={() => { setAiFile(null); setAiReport(null); }} className="text-gray-400 hover:text-red-500 text-xs">X</button>
-              </div>
-            )}
+            <button onClick={verifyAI} disabled={aiLoading} className="bg-purple-600 text-white px-3 py-2 rounded-lg text-xs font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1">
+              {aiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />} {aiLoading ? 'Analyse IA...' : 'Verifier IA'}
+            </button>
           </div>
           {aiReport && (
             <div className={`rounded-xl border p-4 ${aiReport.verdict === 'OK' ? 'bg-green-50 border-green-200' : aiReport.verdict === 'ERREUR' ? 'bg-red-50 border-red-200' : 'bg-yellow-50 border-yellow-200'}`}>

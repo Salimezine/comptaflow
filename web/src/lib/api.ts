@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL || 'https://comptaflow-fajt.onrender.com/api';
+const BASE = import.meta.env.VITE_API_URL || 'https://eurex-api.ezzinesalim21.workers.dev/api';
 
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
   const r = await fetch(`${BASE}${path}`, { headers: { 'Content-Type': 'application/json', ...opts?.headers }, ...opts });
@@ -9,6 +9,7 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  seed: () => req<any>('/seed', { method: 'POST' }),
   dashboard: () => req<any>('/dashboard'),
   getSocietes: () => req<any[]>('/societes'),
   createSociete: (d: any) => req<any>('/societes', { method: 'POST', body: JSON.stringify(d) }),
@@ -18,58 +19,25 @@ export const api = {
   createDossier: (sid: string, d: any) => req<any>(`/societes/${sid}/dossiers`, { method: 'POST', body: JSON.stringify(d) }),
   getDossier: (did: string) => req<any>(`/dossiers/${did}`),
   deleteDossier: (did: string) => req<any>(`/dossiers/${did}`, { method: 'DELETE' }),
-  upload: async (did: string, files: File[]) => {
-    const fd = new FormData();
-    files.forEach(f => fd.append('files', f));
-    const r = await fetch(`${BASE}/dossiers/${did}/upload`, { method: 'POST', body: fd });
-    return r.json();
-  },
   getPieces: (did: string) => req<any[]>(`/dossiers/${did}/pieces`),
-  getEcritures: (did: string) => req<any[]>(`/dossiers/${did}/ecritures`),
+  getEcritures: (did: string, journal?: string) => req<any[]>(`/dossiers/${did}/ecritures${journal ? '?journal=' + encodeURIComponent(journal) : ''}`),
   addEcriture: (did: string, d: any) => req<any>(`/dossiers/${did}/ecritures`, { method: 'POST', body: JSON.stringify(d) }),
   deleteEcriture: (eid: string) => req<any>(`/ecritures/${eid}`, { method: 'DELETE' }),
-  deleteAllEcritures: (did: string) => req<any>(`/dossiers/${did}/ecritures`, { method: 'DELETE' }),
-  processVTC: async (did: string, files: File[]) => {
-    const fd = new FormData();
-    files.forEach(f => fd.append('files', f));
-    const r = await fetch(`${BASE}/dossiers/${did}/process-vtc`, { method: 'POST', body: fd });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Erreur ${r.status}`);
-    return r.json();
-  },
-  exportCSV: (did: string) => req<string>(`/dossiers/${did}/export`),
+  deleteAllEcritures: (did: string, journal?: string) => req<any>(`/dossiers/${did}/ecritures${journal ? '?journal=' + encodeURIComponent(journal) : ''}`, { method: 'DELETE' }),
+  exportCSV: (did: string, journal?: string) => req<string>(`/dossiers/${did}/export${journal ? '?journal=' + encodeURIComponent(journal) : ''}`),
   getFactures: (did: string) => req<any[]>(`/dossiers/${did}/factures`),
   addFacture: (did: string, d: any) => req<any>(`/dossiers/${did}/factures`, { method: 'POST', body: JSON.stringify(d) }),
   deleteFacture: (fid: string) => req<any>(`/factures/${fid}`, { method: 'DELETE' }),
   deleteAllFactures: (did: string) => req<any>(`/dossiers/${did}/factures`, { method: 'DELETE' }),
   getExcluded: (did: string) => req<any[]>(`/dossiers/${did}/excluded`),
-  generateVTJC: (did: string, modes?: any) => req<any>(`/dossiers/${did}/generate-vtjc`, { method: 'POST', body: JSON.stringify({ modes: modes || {} }) }),
+  generateVTJC: (did: string) => req<any>(`/dossiers/${did}/generate-vtjc`, { method: 'POST', body: '{}' }),
   getRapport: (did: string) => req<any[]>(`/dossiers/${did}/rapport`),
   deleteRapport: (did: string) => req<any>(`/dossiers/${did}/rapport`, { method: 'DELETE' }),
-  uploadRapport: async (did: string, file: File) => {
-    const fd = new FormData(); fd.append('file', file);
-    const r = await fetch(`${BASE}/dossiers/${did}/rapport`, { method: 'POST', body: fd });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Erreur ${r.status}`);
-    return r.json();
-  },
-  process: async (did: string, files: File[]) => {
-    const fd = new FormData();
-    files.forEach(f => fd.append('files', f));
-    const r = await fetch(`${BASE}/dossiers/${did}/process`, { method: 'POST', body: fd });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Erreur ${r.status}`);
-    return r.json();
-  },
-  processFISC: async (did: string, file: File) => {
-    const fd = new FormData();
-    fd.append('file', file);
-    const r = await fetch(`${BASE}/dossiers/${did}/process-fisc`, { method: 'POST', body: fd });
-    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error + '\n\nDEBUG: ' + JSON.stringify(j.debug, null, 2)); }
-    return r.json();
-  },
-  verifyAI: async (did: string, file: File) => {
-    const fd = new FormData();
-    fd.append('file', file);
-    const r = await fetch(`${BASE}/dossiers/${did}/verify-ai`, { method: 'POST', body: fd });
-    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error); }
-    return r.json();
-  },
+  uploadRapport: (did: string, rows: any[]) => req<any>(`/dossiers/${did}/rapport`, { method: 'POST', body: JSON.stringify({ rows }) }),
+
+  // Client-side PDF processing: send extracted text to Worker
+  processVTC: (did: string, text: string) => req<any>(`/dossiers/${did}/process-vtc`, { method: 'POST', body: JSON.stringify({ text }) }),
+  processFISC: (did: string, dmi: any) => req<any>(`/dossiers/${did}/process-fisc`, { method: 'POST', body: JSON.stringify({ dmi }) }),
+
+  verifyAI: (did: string) => req<any>(`/dossiers/${did}/verify-ai`, { method: 'POST', body: '{}' }),
 };

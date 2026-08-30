@@ -1,20 +1,20 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "comptaflow-api",
+  "name": "eurex-api",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-22",
+  "compatibility_date": "2026-08-30",
   "compatibility_flags": ["nodejs_compat"],
-  "r2_buckets": [
-    { "binding": "PDF_BUCKET", "bucket_name": "comptaflow-pdfs" }
-  ],
   "d1_databases": [
-    { "binding": "DB", "database_name": "comptaflow-db", "database_id": "<DATABASE_ID>" }
+    {
+      "binding": "DB",
+      "database_name": "eurex-db",
+      "database_id": "6505a544-f2d2-4010-9f7b-2da31edd9e93"
+    }
   ],
+  "ai": {
+    "binding": "AI"
+  },
   "vars": {
     "ENVIRONMENT": "production"
-  },
-  "observability": {
-    "enabled": true,
-    "head_sampling_rate": 1
   }
 }
