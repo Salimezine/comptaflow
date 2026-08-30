@@ -3,9 +3,7 @@ import { LayoutDashboard, FileText, FolderOpen, Users, Upload, FileCheck, FileOu
 import Home from './pages/Home';
 import DossierPage from './pages/DossierPage';
 import BaudSocietes from './pages/baud/BaudSocietes';
-import BaudUpload from './pages/baud/BaudUpload';
-import BaudControle from './pages/baud/BaudControle';
-import BaudExport from './pages/baud/BaudExport';
+import BaudDossierPage from './pages/baud/BaudDossierPage';
 
 const eurexNav = [
   { to: '/', label: 'Dossiers', icon: LayoutDashboard },
@@ -13,9 +11,6 @@ const eurexNav = [
 
 const baudNav = [
   { to: '/baud/societes', label: 'Societes', icon: Users },
-  { to: '/baud/upload', label: 'Fiche navette', icon: Upload },
-  { to: '/baud/controle', label: 'Controle', icon: FileCheck },
-  { to: '/baud/export', label: 'Export Sage GA', icon: FileOutput },
 ];
 
 export default function App() {
@@ -60,9 +55,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/dossier/:id" element={<DossierPage />} />
           <Route path="/baud/societes" element={<BaudSocietes />} />
-          <Route path="/baud/upload" element={<BaudUpload />} />
-          <Route path="/baud/controle" element={<BaudControle />} />
-          <Route path="/baud/export" element={<BaudExport />} />
+          <Route path="/baud/dossier/:id" element={<BaudDossierPage />} />
         </Routes>
       </main>
     </div>

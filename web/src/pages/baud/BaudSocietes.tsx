@@ -1,28 +1,45 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
+import { FolderOpen, Plus } from 'lucide-react';
 
 export default function BaudSocietes() {
   const [societes, setSocietes] = useState<any[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [dossiers, setDossiers] = useState<any[]>([]);
   const [salaries, setSalaries] = useState<any[]>([]);
   const [rubriques, setRubriques] = useState<any[]>([]);
   const [showNew, setShowNew] = useState(false);
   const [nom, setNom] = useState('');
   const [activite, setActivite] = useState('');
+  const [newMois, setNewMois] = useState(new Date().getMonth() + 1);
+  const [newAnnee, setNewAnnee] = useState(new Date().getFullYear());
+  const [creatingDossier, setCreatingDossier] = useState(false);
 
   useEffect(() => { api.baud.getSocietes().then(setSocietes).catch(() => {}); }, []);
 
   useEffect(() => {
     if (!selectedId) return;
+    api.baud.getDossiers(selectedId).then(setDossiers).catch(() => {});
     api.baud.getSalaries(selectedId).then(setSalaries).catch(() => {});
     api.baud.getRubriques(selectedId).then(setRubriques).catch(() => {});
   }, [selectedId]);
 
-  const create = async () => {
+  const createSociete = async () => {
     if (!nom.trim()) return;
     const s = await api.baud.createSociete({ nom: nom.trim(), activite: activite.trim() || undefined });
     setSocietes([...societes, s]);
     setNom(''); setActivite(''); setShowNew(false);
+  };
+
+  const createDossier = async () => {
+    if (!selectedId || creatingDossier) return;
+    setCreatingDossier(true);
+    try {
+      const d = await api.baud.createDossier(selectedId, { mois: newMois, annee: newAnnee });
+      setDossiers([d, ...dossiers]);
+    } catch {}
+    setCreatingDossier(false);
   };
 
   const selected = societes.find(s => s.id === selectedId);
@@ -38,7 +55,7 @@ export default function BaudSocietes() {
         <div className="bg-white border rounded-lg p-4 space-y-3">
           <input placeholder="Nom" value={nom} onChange={e => setNom(e.target.value)} className="w-full border rounded px-3 py-2 text-sm" />
           <input placeholder="Activite (optionnel)" value={activite} onChange={e => setActivite(e.target.value)} className="w-full border rounded px-3 py-2 text-sm" />
-          <button onClick={create} className="px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700">Creer</button>
+          <button onClick={createSociete} className="px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700">Creer</button>
         </div>
       )}
 
@@ -60,6 +77,41 @@ export default function BaudSocietes() {
                 <h3 className="font-medium mb-2">{selected.nom}</h3>
                 <p className="text-sm text-gray-500">Activite: {selected.activite || '—'}</p>
                 <p className="text-sm text-gray-500">MF: {selected.matricule_fiscal || '—'}</p>
+              </div>
+
+              {/* Dossiers */}
+              <div className="bg-white border rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-medium text-sm">Dossiers ({dossiers.length})</h4>
+                  <div className="flex gap-2 items-end">
+                    <select value={newMois} onChange={e => setNewMois(Number(e.target.value))} className="border rounded px-2 py-1 text-xs">
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{String(m).padStart(2, '0')}</option>)}
+                    </select>
+                    <select value={newAnnee} onChange={e => setNewAnnee(Number(e.target.value))} className="border rounded px-2 py-1 text-xs">
+                      {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    <button onClick={createDossier} disabled={creatingDossier}
+                      className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1">
+                      <Plus size={12} />Nouveau
+                    </button>
+                  </div>
+                </div>
+                {dossiers.length === 0 && <p className="text-xs text-gray-400">Aucun dossier</p>}
+                <div className="divide-y">
+                  {dossiers.map((d: any) => (
+                    <Link key={d.id} to={`/baud/dossier/${d.id}`}
+                      className="flex items-center justify-between py-2 hover:bg-gray-50 px-2 rounded">
+                      <div className="flex items-center gap-2">
+                        <FolderOpen size={16} className="text-blue-500" />
+                        <span className="text-sm font-medium">{String(d.mois).padStart(2, '0')}/{d.annee}</span>
+                        <span className={`px-2 py-0.5 rounded text-xs ${d.statut === 'valide' ? 'bg-green-100 text-green-700' : d.statut === 'controle' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                          {d.statut}
+                        </span>
+                      </div>
+                      <span className="text-xs text-gray-400">{d.fichier_navette_nom || 'Pas de fichier'}</span>
+                    </Link>
+                  ))}
+                </div>
               </div>
 
               <div className="bg-white border rounded-lg p-4">
