@@ -614,13 +614,14 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
 
           // Auto-extract
           await env.DB.prepare('DELETE FROM lignes_extraites WHERE dossier_id = ?').bind(did).run();
-          const salariesR = await env.DB.prepare('SELECT * FROM salaries_paie WHERE societe_id = ?').bind(dossier.societe_id).all();
           const correctionsR = await env.DB.prepare('SELECT * FROM corrections WHERE societe_id = ? ORDER BY hit_count DESC').bind(dossier.societe_id).all();
           const corrList = correctionsR.results as any[];
-          const insertLigne = env.DB.prepare('INSERT INTO lignes_extraites (id, dossier_id, salary_id, matricule, nom_prenom, type_ligne, champs, rubrique_code, zone, valeur, source_feuille, source_plage, confiance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-          const batch: D1PreparedStatement[] = [];
-          const corrHits: string[] = [];
 
+          // Pass 1: extract matricules + noms from all rows, apply corrections
+          const seenMatricules = new Map<string, string>(); // matricule -> nom_prenom
+          const seenRubriques = new Set<string>();
+          const corrHits: string[] = [];
+          const preprocessed: any[] = [];
           for (const raw of lignes) {
             try {
               const cells = Array.isArray(raw?.champs) ? raw.champs : [];
@@ -648,10 +649,52 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
                   }
                 } catch { /* skip bad correction */ }
               }
-
-              const salaryMatch = matricule ? (salariesR.results as any[]).find(s => s.matricule === matricule) : null;
-              batch.push(insertLigne.bind(genId(), did, salaryMatch?.id || null, matricule || null, nomPrenom || null, 'variable', JSON.stringify(cells), rubrique_code, zone, valeur, raw.source_feuille || null, raw.source_ligne ? String(raw.source_ligne) : null, null));
+              if (matricule && !seenMatricules.has(matricule)) seenMatricules.set(matricule, nomPrenom);
+              if (rubrique_code) seenRubriques.add(rubrique_code);
+              preprocessed.push({ cells, matricule, nomPrenom, rubrique_code, zone, valeur, raw });
             } catch { /* skip bad row */ }
+          }
+
+          // Auto-create missing salaries
+          const existingSalR = await env.DB.prepare('SELECT matricule FROM salaries_paie WHERE societe_id = ?').bind(dossier.societe_id).all();
+          const existingMatricules = new Set((existingSalR.results as any[]).map(s => s.matricule));
+          const newSalaryBatch: D1PreparedStatement[] = [];
+          for (const [mat, nom] of seenMatricules) {
+            if (!existingMatricules.has(mat)) {
+              newSalaryBatch.push(env.DB.prepare('INSERT OR IGNORE INTO salaries_paie (id, societe_id, matricule, nom) VALUES (?, ?, ?, ?)').bind(genId(), dossier.societe_id, mat, nom || ''));
+              existingMatricules.add(mat);
+            }
+          }
+          if (newSalaryBatch.length) {
+            for (let i = 0; i < newSalaryBatch.length; i += 50) {
+              try { await env.DB.batch(newSalaryBatch.slice(i, i + 50)); } catch {}
+            }
+          }
+
+          // Auto-create missing rubriques
+          const existingRubR = await env.DB.prepare('SELECT code FROM rubriques_paie WHERE societe_id = ?').bind(dossier.societe_id).all();
+          const existingCodes = new Set((existingRubR.results as any[]).map(r => r.code));
+          const newRubBatch: D1PreparedStatement[] = [];
+          for (const code of seenRubriques) {
+            if (!existingCodes.has(code)) {
+              newRubBatch.push(env.DB.prepare('INSERT OR IGNORE INTO rubriques_paie (id, societe_id, code, libelle, type, zone) VALUES (?, ?, ?, ?, ?, ?)').bind(genId(), dossier.societe_id, code, code, 'rubrique', '0'));
+              existingCodes.add(code);
+            }
+          }
+          if (newRubBatch.length) {
+            for (let i = 0; i < newRubBatch.length; i += 50) {
+              try { await env.DB.batch(newRubBatch.slice(i, i + 50)); } catch {}
+            }
+          }
+
+          // Re-fetch salaries for linking
+          const salariesR = await env.DB.prepare('SELECT * FROM salaries_paie WHERE societe_id = ?').bind(dossier.societe_id).all();
+          const insertLigne = env.DB.prepare('INSERT INTO lignes_extraites (id, dossier_id, salary_id, matricule, nom_prenom, type_ligne, champs, rubrique_code, zone, valeur, source_feuille, source_plage, confiance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+          const batch: D1PreparedStatement[] = [];
+
+          for (const p of preprocessed) {
+            const salaryMatch = p.matricule ? (salariesR.results as any[]).find(s => s.matricule === p.matricule) : null;
+            batch.push(insertLigne.bind(genId(), did, salaryMatch?.id || null, p.matricule || null, p.nomPrenom || null, 'variable', JSON.stringify(p.cells), p.rubrique_code, p.zone, p.valeur, p.raw.source_feuille || null, p.raw.source_ligne ? String(p.raw.source_ligne) : null, null));
           }
 
           // Batch insert (chunks of 50)
