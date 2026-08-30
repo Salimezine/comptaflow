@@ -7,7 +7,16 @@ const crypto = require('crypto');
 const fs = require('fs');
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
+
+// Keep-alive: self-ping every 10 minutes to prevent Render free tier from sleeping
+if (process.env.RENDER_EXTERNAL_URL) {
+  const url = process.env.RENDER_EXTERNAL_URL;
+  setInterval(() => {
+    fetch(url).catch(() => {});
+  }, 10 * 60 * 1000);
+  console.log('Keep-alive enabled for:', url);
+}
 
 app.use(cors());
 app.use(express.json());

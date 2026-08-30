@@ -598,20 +598,43 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         return d ? json(d) : json({ error: 'Non trouve' }, 404);
       }
 
-      // --- BAUD: UPLOAD FICHE NAVETTE ---
+      // --- BAUD: UPLOAD FICHE NAVETTE (auto-extract) ---
       const baudUploadMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)\/upload$/);
       if (baudUploadMatch && method === 'POST') {
         const did = baudUploadMatch[1];
-        const dossier = await env.DB.prepare('SELECT * FROM dossiers_paie WHERE id = ?').bind(did).first();
+        const dossier = await env.DB.prepare('SELECT * FROM dossiers_paie WHERE id = ?').bind(did).first() as any;
         if (!dossier) return json({ error: 'Dossier non trouve' }, 404);
         const b = await request.json() as any;
         const { filename, lignes } = b;
         if (!filename || !lignes) return json({ error: 'filename et lignes requis' }, 400);
-        await env.DB.prepare("UPDATE dossiers_paie SET fichier_navette_nom = ?, statut = 'brouillon', extraction_json = ?, updated_at = datetime('now') WHERE id = ?").bind(filename, JSON.stringify({ lignes }), did).run();
-        return json({ ok: true, fichier_nom: filename, lignes_count: lignes.length });
+
+        // Store raw data
+        await env.DB.prepare("UPDATE dossiers_paie SET fichier_navette_nom = ?, extraction_json = ?, updated_at = datetime('now') WHERE id = ?").bind(filename, JSON.stringify({ lignes }), did).run();
+
+        // Auto-extract: delete old, insert raw rows as lignes
+        await env.DB.prepare('DELETE FROM lignes_extraites WHERE dossier_id = ?').bind(did).run();
+        const salariesR = await env.DB.prepare('SELECT * FROM salaries_paie WHERE societe_id = ?').bind(dossier.societe_id).all();
+        const insertLigne = env.DB.prepare('INSERT INTO lignes_extraites (id, dossier_id, salary_id, matricule, nom_prenom, type_ligne, champs, rubrique_code, zone, valeur, source_feuille, source_plage, confiance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        const batch: D1PreparedStatement[] = [];
+        for (const raw of lignes) {
+          const cells = raw.champs || [];
+          let matricule = '';
+          let nomPrenom = '';
+          for (const cell of cells) {
+            const trimmed = String(cell).trim();
+            if (/^\d{2,6}$/.test(trimmed) && !matricule) { matricule = trimmed; continue; }
+            if (trimmed.length > 3 && /[a-zA-Z]/.test(trimmed) && !nomPrenom && !matricule) { nomPrenom = trimmed; }
+          }
+          const salaryMatch = matricule ? (salariesR.results as any[]).find(s => s.matricule === matricule) : null;
+          batch.push(insertLigne.bind(genId(), did, salaryMatch?.id || null, matricule || null, nomPrenom || null, 'variable', JSON.stringify(cells), null, null, null, raw.source_feuille || null, raw.source_ligne ? String(raw.source_ligne) : null, null));
+        }
+        if (batch.length > 0) await env.DB.batch(batch);
+        await env.DB.prepare("UPDATE dossiers_paie SET statut = 'controle', extraction_confiance = 1, updated_at = datetime('now') WHERE id = ?").bind(did).run();
+
+        return json({ ok: true, fichier_nom: filename, lignes_count: batch.length });
       }
 
-      // --- BAUD: EXTRACT (via IA) ---
+      // --- BAUD: EXTRACT — stores raw uploaded rows as lignes ---
       const baudExtractMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)\/extract$/);
       if (baudExtractMatch && method === 'POST') {
         const did = baudExtractMatch[1];
@@ -620,27 +643,40 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         const extractionJson = dossier.extraction_json ? JSON.parse(dossier.extraction_json) : null;
         if (!extractionJson?.lignes) return json({ error: 'Upload d\'abord' }, 400);
 
-        await env.DB.prepare("UPDATE dossiers_paie SET statut = 'extraction', updated_at = datetime('now') WHERE id = ?").bind(did).run();
+        // Delete previous extraction
+        await env.DB.prepare('DELETE FROM lignes_extraites WHERE dossier_id = ?').bind(did).run();
 
-        try {
-          const rubriques = await env.DB.prepare('SELECT * FROM rubriques_paie WHERE societe_id = ? AND actif = 1').bind(dossier.societe_id).all();
-          const salaries = await env.DB.prepare('SELECT * FROM salaries_paie WHERE societe_id = ?').bind(dossier.societe_id).all();
-          const lignes = extractionJson.lignes || [];
+        const rawLignes = extractionJson.lignes as any[];
+        const salariesR = await env.DB.prepare('SELECT * FROM salaries_paie WHERE societe_id = ?').bind(dossier.societe_id).all();
+        const insertLigne = env.DB.prepare('INSERT INTO lignes_extraites (id, dossier_id, salary_id, matricule, nom_prenom, type_ligne, champs, rubrique_code, zone, valeur, source_feuille, source_plage, confiance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        const batch: D1PreparedStatement[] = [];
 
-          const insertLigne = env.DB.prepare('INSERT INTO lignes_extraites (id, dossier_id, salary_id, matricule, nom_prenom, type_ligne, champs, rubrique_code, zone, valeur, source_feuille, source_plage, confiance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-          const batch: D1PreparedStatement[] = [];
-          for (const ligne of lignes) {
-            const salaryMatch = ligne.matricule ? (salaries.results as any[]).find(s => s.matricule === ligne.matricule) : null;
-            batch.push(insertLigne.bind(genId(), did, salaryMatch?.id || null, ligne.matricule || null, ligne.nom_prenom || null, ligne.type_ligne || 'variable', JSON.stringify(ligne.champs || {}), ligne.rubrique_code || null, ligne.zone || null, ligne.valeur || null, ligne.source_feuille || null, ligne.source_plage || null, ligne.confiance || null));
+        for (const raw of rawLignes) {
+          // raw = { source_feuille, source_ligne, champs: string[] }
+          const cells = raw.champs || [];
+          // Try to find matricule: look for first cell that looks like a matricule (short numeric or alphanumeric code)
+          let matricule = '';
+          let nomPrenom = '';
+          for (const cell of cells) {
+            const trimmed = String(cell).trim();
+            if (/^\d{2,6}$/.test(trimmed) && !matricule) { matricule = trimmed; continue; }
+            if (trimmed.length > 3 && /[a-zA-Z]/.test(trimmed) && !nomPrenom && !matricule) { nomPrenom = trimmed; }
           }
-          if (batch.length > 0) await env.DB.batch(batch);
+          const salaryMatch = matricule ? (salariesR.results as any[]).find(s => s.matricule === matricule) : null;
 
-          await env.DB.prepare("UPDATE dossiers_paie SET statut = 'controle', extraction_confiance = ?, updated_at = datetime('now') WHERE id = ?").bind(extractionJson.confiance || 0, did).run();
-          return json({ ok: true, lignes_count: lignes.length, confiance: extractionJson.confiance || 0 });
-        } catch (e: any) {
-          await env.DB.prepare("UPDATE dossiers_paie SET statut = 'brouillon', extraction_log = ?, updated_at = datetime('now') WHERE id = ?").bind(e.message, did).run();
-          return json({ error: 'Extraction echouee: ' + e.message }, 500);
+          batch.push(insertLigne.bind(
+            genId(), did, salaryMatch?.id || null,
+            matricule || null, nomPrenom || null,
+            'variable', JSON.stringify(cells),
+            null, null, null,
+            raw.source_feuille || null, raw.source_ligne ? String(raw.source_ligne) : null, null
+          ));
         }
+
+        if (batch.length > 0) await env.DB.batch(batch);
+
+        await env.DB.prepare("UPDATE dossiers_paie SET statut = 'controle', extraction_confiance = 1, updated_at = datetime('now') WHERE id = ?").bind(did).run();
+        return json({ ok: true, lignes_count: batch.length });
       }
 
       // --- BAUD: LIGNES ---

@@ -27,7 +27,6 @@ export default function BaudUpload() {
   const [dossier, setDossier] = useState<any>(null);
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [extracting, setExtracting] = useState(false);
   const [msg, setMsg] = useState('');
 
   useEffect(() => { api.baud.getSocietes().then(setSocietes).catch(() => {}); }, []);
@@ -52,22 +51,11 @@ export default function BaudUpload() {
       const data = await file.arrayBuffer();
       const wb = XLSX.read(data, { type: 'array' });
       const lignes = parseExcelRows(wb);
-      await api.baud.upload(dossier.id, file.name, lignes);
-      setMsg(`Fichier upload\u00e9 \u2014 ${lignes.length} lignes extraites`);
-      setDossier({ ...dossier, fichier_navette_nom: file.name });
+      const res = await api.baud.upload(dossier.id, file.name, lignes);
+      setMsg(`${res.lignes_count} lignes extraites automatiquement`);
+      setDossier({ ...dossier, fichier_navette_nom: file.name, statut: 'controle' });
     } catch (e: any) { setMsg(e.message); }
     setUploading(false);
-  };
-
-  const extract = async () => {
-    if (!dossier) return;
-    setExtracting(true); setMsg('Extraction en cours via IA...');
-    try {
-      const res = await api.baud.extract(dossier.id);
-      setMsg(`Extraction terminee. Confiance: ${Math.round((res.confiance || 0) * 100)}%`);
-      setDossier({ ...dossier, statut: 'controle' });
-    } catch (e: any) { setMsg(e.message); }
-    setExtracting(false);
   };
 
   return (
@@ -112,10 +100,6 @@ export default function BaudUpload() {
               <UploadIcon size={14} />{uploading ? 'Upload...' : 'Upload'}
             </button>
           </div>
-          <button onClick={extract} disabled={extracting || dossier.statut === 'extraction'}
-            className="px-4 py-2 bg-orange-600 text-white rounded text-sm hover:bg-orange-700 disabled:opacity-50">
-            {extracting ? 'Extraction en cours...' : 'Lancer extraction IA'}
-          </button>
           {msg && <p className={`text-sm ${msg.includes('Erreur') || msg.includes('echou') ? 'text-red-600' : 'text-green-700'}`}>{msg}</p>}
         </div>
       )}
