@@ -67,5 +67,7 @@ export const api = {
       if (!r.ok) throw new Error('Download failed');
       return r.blob();
     },
+    getCorrections: (sid: string) => req<any[]>(`/baud/societes/${sid}/corrections`),
+    deleteCorrection: (cid: string) => req<any>(`/baud/corrections/${cid}`, { method: 'DELETE' }),
   },
 };

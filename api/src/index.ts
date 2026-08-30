@@ -614,6 +614,8 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         // Auto-extract: delete old, insert raw rows as lignes
         await env.DB.prepare('DELETE FROM lignes_extraites WHERE dossier_id = ?').bind(did).run();
         const salariesR = await env.DB.prepare('SELECT * FROM salaries_paie WHERE societe_id = ?').bind(dossier.societe_id).all();
+        const correctionsR = await env.DB.prepare('SELECT * FROM corrections WHERE societe_id = ? ORDER BY hit_count DESC').bind(dossier.societe_id).all();
+        const corrList = correctionsR.results as any[];
         const insertLigne = env.DB.prepare('INSERT INTO lignes_extraites (id, dossier_id, salary_id, matricule, nom_prenom, type_ligne, champs, rubrique_code, zone, valeur, source_feuille, source_plage, confiance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         const batch: D1PreparedStatement[] = [];
         for (const raw of lignes) {
@@ -625,13 +627,31 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
             if (/^\d{2,6}$/.test(trimmed) && !matricule) { matricule = trimmed; continue; }
             if (trimmed.length > 3 && /[a-zA-Z]/.test(trimmed) && !nomPrenom && !matricule) { nomPrenom = trimmed; }
           }
+
+          // Apply learned corrections
+          let rubrique_code: string | null = null;
+          let zone: string | null = null;
+          let valeur: number | null = null;
+          const rowKey = cells.join('|');
+          for (const corr of corrList) {
+            if (corr.source_pattern && rowKey.includes(corr.source_pattern)) {
+              if (corr.field === 'rubrique_code') { rubrique_code = corr.new_value; await env.DB.prepare('UPDATE corrections SET hit_count = hit_count + 1 WHERE id = ?').bind(corr.id).run(); }
+              if (corr.field === 'zone') { zone = corr.new_value; await env.DB.prepare('UPDATE corrections SET hit_count = hit_count + 1 WHERE id = ?').bind(corr.id).run(); }
+              if (corr.field === 'valeur') { valeur = parseFloat(corr.new_value); await env.DB.prepare('UPDATE corrections SET hit_count = hit_count + 1 WHERE id = ?').bind(corr.id).run(); }
+            }
+            if (corr.field === 'matricule' && corr.old_value && matricule === corr.old_value) {
+              matricule = corr.new_value;
+              await env.DB.prepare('UPDATE corrections SET hit_count = hit_count + 1 WHERE id = ?').bind(corr.id).run();
+            }
+          }
+
           const salaryMatch = matricule ? (salariesR.results as any[]).find(s => s.matricule === matricule) : null;
-          batch.push(insertLigne.bind(genId(), did, salaryMatch?.id || null, matricule || null, nomPrenom || null, 'variable', JSON.stringify(cells), null, null, null, raw.source_feuille || null, raw.source_ligne ? String(raw.source_ligne) : null, null));
+          batch.push(insertLigne.bind(genId(), did, salaryMatch?.id || null, matricule || null, nomPrenom || null, 'variable', JSON.stringify(cells), rubrique_code, zone, valeur, raw.source_feuille || null, raw.source_ligne ? String(raw.source_ligne) : null, null));
         }
         if (batch.length > 0) await env.DB.batch(batch);
         await env.DB.prepare("UPDATE dossiers_paie SET statut = 'controle', extraction_confiance = 1, updated_at = datetime('now') WHERE id = ?").bind(did).run();
 
-        return json({ ok: true, fichier_nom: filename, lignes_count: batch.length });
+        return json({ ok: true, fichier_nom: filename, lignes_count: batch.length, corrections_applied: corrList.length });
       }
 
       // --- BAUD: EXTRACT — stores raw uploaded rows as lignes ---
@@ -648,13 +668,13 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
 
         const rawLignes = extractionJson.lignes as any[];
         const salariesR = await env.DB.prepare('SELECT * FROM salaries_paie WHERE societe_id = ?').bind(dossier.societe_id).all();
+        const correctionsR = await env.DB.prepare('SELECT * FROM corrections WHERE societe_id = ? ORDER BY hit_count DESC').bind(dossier.societe_id).all();
+        const corrList = correctionsR.results as any[];
         const insertLigne = env.DB.prepare('INSERT INTO lignes_extraites (id, dossier_id, salary_id, matricule, nom_prenom, type_ligne, champs, rubrique_code, zone, valeur, source_feuille, source_plage, confiance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         const batch: D1PreparedStatement[] = [];
 
         for (const raw of rawLignes) {
-          // raw = { source_feuille, source_ligne, champs: string[] }
           const cells = raw.champs || [];
-          // Try to find matricule: look for first cell that looks like a matricule (short numeric or alphanumeric code)
           let matricule = '';
           let nomPrenom = '';
           for (const cell of cells) {
@@ -662,13 +682,32 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
             if (/^\d{2,6}$/.test(trimmed) && !matricule) { matricule = trimmed; continue; }
             if (trimmed.length > 3 && /[a-zA-Z]/.test(trimmed) && !nomPrenom && !matricule) { nomPrenom = trimmed; }
           }
+
+          // Apply learned corrections
+          let rubrique_code: string | null = null;
+          let zone: string | null = null;
+          let valeur: number | null = null;
+          const rowKey = cells.join('|');
+
+          for (const corr of corrList) {
+            if (corr.source_pattern && rowKey.includes(corr.source_pattern)) {
+              if (corr.field === 'rubrique_code') { rubrique_code = corr.new_value; await env.DB.prepare('UPDATE corrections SET hit_count = hit_count + 1 WHERE id = ?').bind(corr.id).run(); }
+              if (corr.field === 'zone') { zone = corr.new_value; await env.DB.prepare('UPDATE corrections SET hit_count = hit_count + 1 WHERE id = ?').bind(corr.id).run(); }
+              if (corr.field === 'valeur') { valeur = parseFloat(corr.new_value); await env.DB.prepare('UPDATE corrections SET hit_count = hit_count + 1 WHERE id = ?').bind(corr.id).run(); }
+            }
+            if (corr.field === 'matricule' && corr.old_value && matricule === corr.old_value) {
+              matricule = corr.new_value;
+              await env.DB.prepare('UPDATE corrections SET hit_count = hit_count + 1 WHERE id = ?').bind(corr.id).run();
+            }
+          }
+
           const salaryMatch = matricule ? (salariesR.results as any[]).find(s => s.matricule === matricule) : null;
 
           batch.push(insertLigne.bind(
             genId(), did, salaryMatch?.id || null,
             matricule || null, nomPrenom || null,
             'variable', JSON.stringify(cells),
-            null, null, null,
+            rubrique_code, zone, valeur,
             raw.source_feuille || null, raw.source_ligne ? String(raw.source_ligne) : null, null
           ));
         }
@@ -676,7 +715,7 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         if (batch.length > 0) await env.DB.batch(batch);
 
         await env.DB.prepare("UPDATE dossiers_paie SET statut = 'controle', extraction_confiance = 1, updated_at = datetime('now') WHERE id = ?").bind(did).run();
-        return json({ ok: true, lignes_count: batch.length });
+        return json({ ok: true, lignes_count: batch.length, corrections_applied: corrList.length });
       }
 
       // --- BAUD: LIGNES ---
@@ -687,6 +726,10 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
       }
       const baudLigneUpdateMatch = path.match(/^\/api\/baud\/lignes\/([^/]+)$/);
       if (baudLigneUpdateMatch && method === 'PUT') {
+        const ligneId = baudLigneUpdateMatch[1];
+        const oldLigne = await env.DB.prepare('SELECT * FROM lignes_extraites WHERE id = ?').bind(ligneId).first() as any;
+        if (!oldLigne) return json({ error: 'Ligne non trouvee' }, 404);
+
         const b = await request.json() as any;
         const fields: string[] = [];
         const values: unknown[] = [];
@@ -697,15 +740,43 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
           }
         }
         if (fields.length === 0) return json({ error: 'Aucun champ' });
-        values.push(baudLigneUpdateMatch[1]);
+        values.push(ligneId);
         await env.DB.prepare(`UPDATE lignes_extraites SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
-        return await env.DB.prepare('SELECT * FROM lignes_extraites WHERE id = ?').bind(baudLigneUpdateMatch[1]).first();
+
+        // Store corrections for AI learning
+        const learnFields = ['matricule', 'rubrique_code', 'zone', 'valeur'];
+        const dossier = await env.DB.prepare('SELECT societe_id FROM dossiers_paie WHERE id = ?').bind(oldLigne.dossier_id).first() as any;
+        if (dossier) {
+          for (const f of learnFields) {
+            if (b[f] !== undefined && b[f] !== oldLigne[f] && b[f] !== '' && b[f] !== null) {
+              const oldVal = String(oldLigne[f] || '');
+              const newVal = String(b[f]);
+              const cells = JSON.parse(oldLigne.champs || '[]');
+              const sourcePattern = cells.length > 2 ? cells.slice(0, 3).join('|') : null;
+              await env.DB.prepare('INSERT INTO corrections (id, societe_id, field, old_value, new_value, source_pattern) VALUES (?, ?, ?, ?, ?, ?)').bind(genId(), dossier.societe_id, f, oldVal, newVal, sourcePattern).run();
+            }
+          }
+        }
+
+        return await env.DB.prepare('SELECT * FROM lignes_extraites WHERE id = ?').bind(ligneId).first();
       }
 
       // --- BAUD: VALIDER ---
       const baudValiderMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)\/valider$/);
       if (baudValiderMatch && method === 'POST') {
         await env.DB.prepare("UPDATE dossiers_paie SET statut = 'valide', updated_at = datetime('now') WHERE id = ?").bind(baudValiderMatch[1]).run();
+        return json({ ok: true });
+      }
+
+      // --- BAUD: CORRECTIONS (AI learning) ---
+      const baudCorrMatch = path.match(/^\/api\/baud\/societes\/([^/]+)\/corrections$/);
+      if (baudCorrMatch && method === 'GET') {
+        const r = await env.DB.prepare('SELECT * FROM corrections WHERE societe_id = ? ORDER BY hit_count DESC').bind(baudCorrMatch[1]).all();
+        return json(r.results);
+      }
+      const baudCorrDelMatch = path.match(/^\/api\/baud\/corrections\/([^/]+)$/);
+      if (baudCorrDelMatch && method === 'DELETE') {
+        await env.DB.prepare('DELETE FROM corrections WHERE id = ?').bind(baudCorrDelMatch[1]).run();
         return json({ ok: true });
       }
 

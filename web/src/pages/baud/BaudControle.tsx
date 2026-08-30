@@ -7,10 +7,14 @@ export default function BaudControle() {
   const [dossiers, setDossiers] = useState<any[]>([]);
   const [dossierId, setDossierId] = useState('');
   const [lignes, setLignes] = useState<any[]>([]);
+  const [corrections, setCorrections] = useState<any[]>([]);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editVal, setEditVal] = useState('');
+  const [editField, setEditField] = useState('');
   const [msg, setMsg] = useState('');
 
   useEffect(() => { api.baud.getSocietes().then(setSocietes).catch(() => {}); }, []);
-  useEffect(() => { if (societeId) api.baud.getDossiers(societeId).then(setDossiers).catch(() => {}); }, [societeId]);
+  useEffect(() => { if (societeId) { api.baud.getDossiers(societeId).then(setDossiers).catch(() => {}); api.baud.getCorrections(societeId).then(setCorrections).catch(() => {}); } }, [societeId]);
   useEffect(() => { if (dossierId) api.baud.getLignes(dossierId).then(setLignes).catch(() => {}); }, [dossierId]);
 
   const valider = async () => {
@@ -18,6 +22,28 @@ export default function BaudControle() {
     setMsg('');
     try { await api.baud.valider(dossierId); setMsg('Dossier valide !'); }
     catch (e: any) { setMsg(e.message); }
+  };
+
+  const startEdit = (ligneId: string, field: string, value: any) => {
+    setEditing(ligneId); setEditField(field); setEditVal(String(value ?? ''));
+  };
+
+  const saveEdit = async (ligneId: string) => {
+    const update: any = {};
+    update[editField] = editField === 'valeur' ? parseFloat(editVal) || 0 : editVal;
+    try {
+      await api.baud.updateLigne(ligneId, update);
+      setLignes(lignes.map(l => l.id === ligneId ? { ...l, ...update } : l));
+      setMsg('Corrigee — l\'IA apprendra de cette correction');
+      // Refresh corrections
+      if (societeId) api.baud.getCorrections(societeId).then(setCorrections).catch(() => {});
+    } catch (e: any) { setMsg(e.message); }
+    setEditing(null);
+  };
+
+  const deleteCorr = async (cid: string) => {
+    await api.baud.deleteCorrection(cid);
+    setCorrections(corrections.filter(c => c.id !== cid));
   };
 
   return (
@@ -48,20 +74,24 @@ export default function BaudControle() {
           <table className="w-full text-sm">
             <thead><tr className="text-left text-xs text-gray-500 border-b bg-gray-50">
               <th className="p-2">Matricule</th><th className="p-2">Nom</th><th className="p-2">Type</th>
-              <th className="p-2">Rubrique</th><th className="p-2">Zone</th><th className="p-2">Valeur</th><th className="p-2">Confiance</th>
+              <th className="p-2">Rubrique</th><th className="p-2">Zone</th><th className="p-2">Valeur</th>
             </tr></thead>
             <tbody className="divide-y">
               {lignes.map((l: any) => (
                 <tr key={l.id} className="hover:bg-gray-50">
-                  <td className="p-2">{l.matricule || '—'}</td>
-                  <td className="p-2">{l.nom_prenom || '—'}</td>
-                  <td className="p-2">{l.type_ligne}</td>
-                  <td className="p-2 font-mono">{l.rubrique_code || '—'}</td>
-                  <td className="p-2">{l.zone || '—'}</td>
-                  <td className="p-2">{l.valeur != null ? Number(l.valeur).toLocaleString('fr-TN', { minimumFractionDigits: 3 }) : '—'}</td>
-                  <td className="p-2">
-                    {l.confiance != null && <span className={l.confiance >= 0.8 ? 'text-green-600' : l.confiance >= 0.5 ? 'text-orange-500' : 'text-red-600'}>{Math.round(l.confiance * 100)}%</span>}
-                  </td>
+                  {(['matricule','nom_prenom','type_ligne','rubrique_code','zone','valeur'] as const).map(f => (
+                    <td key={f} className="p-2 cursor-pointer hover:bg-blue-50"
+                      onClick={() => startEdit(l.id, f, l[f])}>
+                      {editing === l.id && editField === f ? (
+                        <input autoFocus value={editVal} onChange={e => setEditVal(e.target.value)}
+                          onBlur={() => saveEdit(l.id)} onKeyDown={e => e.key === 'Enter' && saveEdit(l.id)}
+                          className="w-full border rounded px-1 py-0.5 text-xs" />
+                      ) : (
+                        f === 'valeur' ? (l[f] != null ? Number(l[f]).toLocaleString('fr-TN', { minimumFractionDigits: 3 }) : '—')
+                          : (l[f] || '—')
+                      )}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -69,6 +99,29 @@ export default function BaudControle() {
         </div>
       )}
       {dossierId && lignes.length === 0 && <p className="text-sm text-gray-400">Aucune ligne extraite</p>}
+
+      {corrections.length > 0 && (
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+          <h3 className="font-medium text-sm mb-2 text-purple-700">Corrections apprises ({corrections.length})</h3>
+          <p className="text-xs text-purple-600 mb-3">Ces corrections seront appliquees automatiquement lors du prochain upload.</p>
+          <table className="w-full text-xs">
+            <thead><tr className="text-left text-purple-500 border-b border-purple-200">
+              <th className="py-1">Champ</th><th>Ancienne valeur</th><th>Nouvelle valeur</th><th>Utilisations</th><th></th>
+            </tr></thead>
+            <tbody className="divide-y divide-purple-100">
+              {corrections.map((c: any) => (
+                <tr key={c.id}>
+                  <td className="py-1 font-medium">{c.field}</td>
+                  <td className="text-red-500">{c.old_value || '(vide)'}</td>
+                  <td className="text-green-600">{c.new_value}</td>
+                  <td>{c.hit_count}x</td>
+                  <td><button onClick={() => deleteCorr(c.id)} className="text-red-400 hover:text-red-600">X</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
