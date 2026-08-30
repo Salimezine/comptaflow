@@ -61,6 +61,8 @@ function VerificationTVA({ ecritures, journal, dossierId, reload }: { ecritures:
 
   const htAccount = journal === 'VT J.C' ? '707219' : '707119';
   const tvaAccount = journal === 'VT J.C' ? '436711' : '436710';
+  const htSens = 'C'; // HT is always credit in VT J.C and VT C
+  const tvaSens = 'C'; // TVA is always credit
 
   const pieces = new Map<string, any[]>();
   for (const e of ecritures) {
@@ -71,8 +73,8 @@ function VerificationTVA({ ecritures, journal, dossierId, reload }: { ecritures:
 
   const checks: any[] = [];
   for (const [pieceRef, lines] of pieces) {
-    const htLine = lines.find((l: any) => l.compte === htAccount && l.sens === 'D');
-    const tvaLine = lines.find((l: any) => l.compte === tvaAccount && l.sens === 'C');
+    const htLine = lines.find((l: any) => l.compte === htAccount && l.sens === htSens);
+    const tvaLine = lines.find((l: any) => l.compte === tvaAccount && l.sens === tvaSens);
     if (!htLine || !tvaLine) continue;
     const ht = htLine.montant || 0;
     const tva = tvaLine.montant || 0;
