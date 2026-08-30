@@ -58,6 +58,7 @@ function parseInvoice(text: string) {
 function VerificationTVA({ ecritures, journal, dossierId, reload }: { ecritures: any[]; journal: string | null; dossierId: string; reload: () => void }) {
   const [aiResult, setAiResult] = useState<any>(null);
   const [aiLoading, setAiLoading] = useState<string | null>(null);
+  const [fixLoading, setFixLoading] = useState<string | null>(null);
 
   const htAccount = journal === 'VT J.C' ? '707219' : '707119';
   const tvaAccount = journal === 'VT J.C' ? '436711' : '436710';
@@ -123,6 +124,28 @@ Reponds en 3 lignes max: cause de l'ecart (oui/non) et correction si necessaire.
     }
   };
 
+  const fixTVA = async (check: any) => {
+    if (!confirm(`Corriger la TVA de la piece ${check.pieceRef}?\nHT: ${check.ht.toFixed(3)} x 19% = ${check.expected.toFixed(3)}\nActuel: ${check.tva.toFixed(3)}`)) return;
+    setFixLoading(check.pieceRef);
+    try {
+      const r = await fetch(`https://eurex-api.ezzinesalim21.workers.dev/api/dossiers/${dossierId}/fix-tva`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ numero_doc: check.pieceRef, journal_code: journal, expected_tva: check.expected })
+      });
+      const data = await r.json();
+      if (data.ok) {
+        setAiResult({ pieceRef: check.pieceRef, response: `Corrige! TVA mise a jour: ${check.expected.toFixed(3)} DT (ecart de ${check.ecart.toFixed(3)} DT corrige).` });
+        reload();
+      } else {
+        setAiResult({ pieceRef: check.pieceRef, response: 'Erreur: ' + (data.error || 'inconnue') });
+      }
+    } catch (e: any) {
+      setAiResult({ pieceRef: check.pieceRef, response: 'Erreur: ' + e.message });
+    } finally {
+      setFixLoading(null);
+    }
+  };
+
   if (ecritures.length === 0) {
     return <div className="bg-white rounded-xl border p-8 text-center text-gray-400 text-sm">Aucune ecriture {journal}. Generez d'abord les ecritures.</div>;
   }
@@ -158,11 +181,17 @@ Reponds en 3 lignes max: cause de l'ecart (oui/non) et correction si necessaire.
                     <td className="px-4 py-2 text-center">{c.ok ? <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-0.5 rounded">OK</span> : <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded">ERREUR</span>}</td>
                     <td className="px-4 py-2">
                       {!c.ok && (
-                        <button onClick={() => launchAI(c)} disabled={aiLoading === c.pieceRef}
-                          className="px-3 py-1 bg-amber-500 text-white rounded text-xs font-medium hover:bg-amber-600 disabled:opacity-50 flex items-center gap-1">
-                          {aiLoading === c.pieceRef ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-                          {aiLoading === c.pieceRef ? 'Analyse...' : 'Verifier IA'}
-                        </button>
+                        <div className="flex gap-1">
+                          <button onClick={() => launchAI(c)} disabled={aiLoading === c.pieceRef || fixLoading === c.pieceRef}
+                            className="px-3 py-1 bg-amber-500 text-white rounded text-xs font-medium hover:bg-amber-600 disabled:opacity-50 flex items-center gap-1">
+                            {aiLoading === c.pieceRef ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                            {aiLoading === c.pieceRef ? 'Analyse...' : 'Verifier IA'}
+                          </button>
+                          <button onClick={() => fixTVA(c)} disabled={fixLoading === c.pieceRef || aiLoading === c.pieceRef}
+                            className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1">
+                            {fixLoading === c.pieceRef ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Corriger'}
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

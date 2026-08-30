@@ -520,6 +520,47 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         }
       }
 
+      // --- FIX TVA 19% ---
+      const fixTvaMatch = path.match(/^\/api\/dossiers\/([^/]+)\/fix-tva$/);
+      if (fixTvaMatch && method === 'POST') {
+        const did = fixTvaMatch[1];
+        const b = await request.json() as any;
+        const { numero_doc, journal_code, expected_tva } = b;
+        if (!numero_doc || !journal_code || expected_tva === undefined) return json({ error: 'numero_doc, journal_code, expected_tva requis' }, 400);
+
+        const tvaAccount = journal_code === 'VT J.C' ? '436711' : '436710';
+        const ecrituresR = await env.DB.prepare('SELECT * FROM ecritures WHERE dossier_id = ? AND numero_doc = ? AND compte = ? AND sens = ?')
+          .bind(did, numero_doc, tvaAccount, 'C').all();
+        if (!ecrituresR.results.length) return json({ error: 'Aucune ecriture TVA trouvee' }, 404);
+
+        // If multiple TVA lines, update proportionally; otherwise update the single one
+        const lines = ecrituresR.results as any[];
+        if (lines.length === 1) {
+          const oldVal = lines[0].montant;
+          await env.DB.prepare('UPDATE ecritures SET montant = ? WHERE id = ?').bind(expected_tva, lines[0].id).run();
+          return json({ ok: true, updated: 1, old: oldVal, new: expected_tva });
+        } else {
+          // Multiple TVA lines: redistribute proportionally based on HT lines
+          const htAccount = journal_code === 'VT J.C' ? '707219' : '707119';
+          const htLines = await env.DB.prepare('SELECT * FROM ecritures WHERE dossier_id = ? AND numero_doc = ? AND compte = ? AND sens = ?')
+            .bind(did, numero_doc, htAccount, 'C').all();
+          const totalHT = (htLines.results as any[]).reduce((s, l) => s + (l.montant || 0), 0);
+          const batch: D1PreparedStatement[] = [];
+          let distributed = 0;
+          for (let i = 0; i < lines.length; i++) {
+            const htLine = (htLines.results as any[])[i];
+            const ratio = htLine && totalHT > 0 ? htLine.montant / totalHT : 1 / lines.length;
+            const newVal = i === lines.length - 1
+              ? Math.round((expected_tva - distributed) * 1000) / 1000
+              : Math.round(expected_tva * ratio * 1000) / 1000;
+            distributed += newVal;
+            batch.push(env.DB.prepare('UPDATE ecritures SET montant = ? WHERE id = ?').bind(newVal, lines[i].id));
+          }
+          for (const stmt of batch) { try { await stmt.run(); } catch {} }
+          return json({ ok: true, updated: lines.length, new_total: expected_tva });
+        }
+      }
+
       // ============================================================
       // BAUD — PAYROLL AUTOMATION
       // ============================================================
