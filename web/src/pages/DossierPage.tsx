@@ -55,6 +55,120 @@ function parseInvoice(text: string) {
   return { date, numero, client, ht0, ht19, tva19, timbre, ttc };
 }
 
+function VerificationTVA({ ecritures, journal, dossierId, reload }: { ecritures: any[]; journal: string | null; dossierId: string; reload: () => void }) {
+  const [aiResult, setAiResult] = useState<any>(null);
+  const [aiLoading, setAiLoading] = useState<string | null>(null);
+
+  const htAccount = journal === 'VT J.C' ? '707219' : '707119';
+  const tvaAccount = journal === 'VT J.C' ? '436711' : '436710';
+
+  const pieces = new Map<string, any[]>();
+  for (const e of ecritures) {
+    const key = e.numero_doc || e.piece || 'sans_ref';
+    if (!pieces.has(key)) pieces.set(key, []);
+    pieces.get(key)!.push(e);
+  }
+
+  const checks: any[] = [];
+  for (const [pieceRef, lines] of pieces) {
+    const htLine = lines.find((l: any) => l.compte === htAccount && l.sens === 'D');
+    const tvaLine = lines.find((l: any) => l.compte === tvaAccount && l.sens === 'C');
+    if (!htLine || !tvaLine) continue;
+    const ht = htLine.montant || 0;
+    const tva = tvaLine.montant || 0;
+    const expected = Math.round(ht * 0.19 * 1000) / 1000;
+    const ecart = Math.round((tva - expected) * 1000) / 1000;
+    const ok = Math.abs(ecart) < 0.01;
+    checks.push({ pieceRef, ht, tva, expected, ecart, ok, date: htLine.date_operation, libelle: htLine.libelle, lines });
+  }
+
+  const allOk = checks.every(c => c.ok);
+  const mismatches = checks.filter(c => !c.ok);
+
+  const launchAI = async (check: any) => {
+    setAiLoading(check.pieceRef);
+    setAiResult(null);
+    try {
+      const ecriText = check.lines.map((l: any) =>
+        `${l.date_operation} | ${l.numero_doc || '-'} | ${l.compte} | ${l.sens} | ${(l.montant || 0).toFixed(3)} | ${l.libelle || ''}`
+      ).join('\n');
+      const prompt = `Tu es expert comptable. Voici les ecritures d'une piece (${check.pieceRef}):\n${ecriText}\n\nVerifier: Le compte ${htAccount} (HT 19%) x 19% = ${check.expected.toFixed(3)} DT\nLe compte ${tvaAccount} (TVA 19%) = ${check.tva.toFixed(3)} DT\nEcart: ${check.ecart.toFixed(3)} DT\n\nExplique la cause de l'ecart et propose une correction.`;
+      const r = await fetch('https://eurex-api.ezzinesalim21.workers.dev/api/ai/verify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
+      const data = await r.json();
+      setAiResult({ pieceRef: check.pieceRef, response: data.response || data.error });
+    } catch (e: any) {
+      setAiResult({ pieceRef: check.pieceRef, response: 'Erreur: ' + e.message });
+    } finally {
+      setAiLoading(null);
+    }
+  };
+
+  if (ecritures.length === 0) {
+    return <div className="bg-white rounded-xl border p-8 text-center text-gray-400 text-sm">Aucune ecriture {journal}. Generez d'abord les ecritures.</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {checks.length === 0 && (
+        <div className="bg-white rounded-xl border p-8 text-center text-gray-400 text-sm">
+          Aucune piece avec TVA 19% trouvee (comptes {htAccount} / {tvaAccount}).
+        </div>
+      )}
+
+      {checks.length > 0 && (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="px-4 py-3 bg-gray-50 border-b">
+            <h3 className="font-semibold text-sm">Verification TVA 19% — {journal}</h3>
+            <p className="text-xs text-gray-500 mt-1">Calcul: HT ({htAccount}) × 19% = TVA ({tvaAccount})</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
+                <th className="px-4 py-2">Piece</th><th className="px-4 py-2">Date</th><th className="px-4 py-2 text-right">HT 19%</th><th className="px-4 py-2 text-right">TVA Calculee</th><th className="px-4 py-2 text-right">TVA Ecrite</th><th className="px-4 py-2 text-right">Ecart</th><th className="px-4 py-2 text-center">Statut</th><th className="px-4 py-2"></th>
+              </tr></thead>
+              <tbody className="divide-y divide-gray-100">
+                {checks.map(c => (
+                  <tr key={c.pieceRef} className={c.ok ? 'hover:bg-gray-50' : 'bg-red-50'}>
+                    <td className="px-4 py-2 font-mono text-xs">{c.pieceRef}</td>
+                    <td className="px-4 py-2 text-xs">{c.date}</td>
+                    <td className="px-4 py-2 text-right font-mono">{c.ht.toFixed(3)}</td>
+                    <td className="px-4 py-2 text-right font-mono">{c.expected.toFixed(3)}</td>
+                    <td className="px-4 py-2 text-right font-mono">{c.tva.toFixed(3)}</td>
+                    <td className={`px-4 py-2 text-right font-mono font-bold ${c.ok ? 'text-emerald-600' : 'text-red-600'}`}>{c.ecart.toFixed(3)}</td>
+                    <td className="px-4 py-2 text-center">{c.ok ? <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-0.5 rounded">OK</span> : <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded">ERREUR</span>}</td>
+                    <td className="px-4 py-2">
+                      {!c.ok && (
+                        <button onClick={() => launchAI(c)} disabled={aiLoading === c.pieceRef}
+                          className="px-3 py-1 bg-amber-500 text-white rounded text-xs font-medium hover:bg-amber-600 disabled:opacity-50 flex items-center gap-1">
+                          {aiLoading === c.pieceRef ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                          {aiLoading === c.pieceRef ? 'Analyse...' : 'Verifier IA'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {aiResult && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <h4 className="font-semibold text-sm text-amber-700 mb-2 flex items-center gap-2">
+            <Zap className="w-4 h-4" /> Resultat IA — Piece {aiResult.pieceRef}
+          </h4>
+          <p className="text-sm text-gray-700 whitespace-pre-wrap">{typeof aiResult.response === 'object' ? JSON.stringify(aiResult.response, null, 2) : aiResult.response}</p>
+          <button onClick={() => setAiResult(null)} className="mt-3 text-xs text-amber-600 hover:underline">Fermer</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DossierPage() {
   const { id } = useParams<{ id: string }>();
   const [dossier, setDossier] = useState<any>(null);
@@ -62,7 +176,7 @@ export default function DossierPage() {
   const [ecritures, setEcritures] = useState<any[]>([]);
   const [factures, setFactures] = useState<any[]>([]);
   const [journal, setJournal] = useState<'VT J.C' | 'VT C' | 'FISC' | null>(null);
-  const [tab, setTab] = useState<'factures' | 'rapport' | 'ecritures' | 'analyse'>('factures');
+  const [tab, setTab] = useState<'factures' | 'rapport' | 'ecritures' | 'analyse' | 'verification'>('factures');
   const [rapport, setRapport] = useState<any[]>([]);
   const [analyse, setAnalyse] = useState<any[]>([]);
   const [analyseLoading, setAnalyseLoading] = useState(false);
@@ -355,9 +469,9 @@ export default function DossierPage() {
       </div>
 
       <div className="flex gap-2">
-        {(isFISC ? ['ecritures'] as const : (['factures', 'rapport', 'ecritures', 'analyse'] as const)).map(t => (
+        {(isFISC ? ['ecritures'] as const : (['factures', 'rapport', 'ecritures', 'analyse', 'verification'] as const)).map(t => (
           <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-lg text-sm font-medium capitalize ${tab === t ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-            {t === 'analyse' ? <><AlertTriangle className="w-3 h-3 inline mr-1" />Analyse</> : t} {t === 'factures' ? `(${factures.length})` : t === 'ecritures' ? `(${ecrituresFiltered.length})` : t === 'rapport' ? `(${rapport.length})` : ''}
+            {t === 'analyse' ? <><AlertTriangle className="w-3 h-3 inline mr-1" />Analyse</> : t === 'verification' ? <>Verification TVA</> : t} {t === 'factures' ? `(${factures.length})` : t === 'ecritures' ? `(${ecrituresFiltered.length})` : t === 'rapport' ? `(${rapport.length})` : ''}
           </button>
         ))}
       </div>
@@ -690,6 +804,9 @@ export default function DossierPage() {
             </>
           )}
         </div>
+      )}
+      {tab === 'verification' && (
+        <VerificationTVA ecritures={ecrituresFiltered} journal={journal} dossierId={id!} reload={() => reload(true)} />
       )}
     </div>
   );

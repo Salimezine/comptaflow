@@ -502,6 +502,24 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         return json({ ok: true, report, ecrituresCount: ecrituresR.results.length });
       }
 
+      // --- AI VERIFY TVA 19% ---
+      if (path === '/api/ai/verify' && method === 'POST') {
+        const b = await request.json() as any;
+        const { prompt } = b;
+        if (!prompt) return json({ error: 'prompt requis' }, 400);
+        try {
+          const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 1500,
+            temperature: 0.2,
+          });
+          const response = aiResponse?.response || aiResponse?.result?.response || JSON.stringify(aiResponse);
+          return json({ ok: true, response });
+        } catch (e: any) {
+          return json({ error: 'AI error: ' + e.message }, 500);
+        }
+      }
+
       // ============================================================
       // BAUD — PAYROLL AUTOMATION
       // ============================================================
