@@ -471,7 +471,7 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
 
         let aiResponse: any;
         try {
-          aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+          aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
             messages: [
               { role: 'system', content: 'Reponds toujours en JSON valide.' },
               { role: 'user', content: prompt }
@@ -508,7 +508,7 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         const { prompt } = b;
         if (!prompt) return json({ error: 'prompt requis' }, 400);
         try {
-          const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+          const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
             messages: [{ role: 'user', content: prompt }],
             max_tokens: 1500,
             temperature: 0.2,
