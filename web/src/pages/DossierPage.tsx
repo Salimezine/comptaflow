@@ -73,15 +73,15 @@ function VerificationTVA({ ecritures, journal, dossierId, reload }: { ecritures:
 
   const checks: any[] = [];
   for (const [pieceRef, lines] of pieces) {
-    const htLine = lines.find((l: any) => l.compte === htAccount && l.sens === htSens);
-    const tvaLine = lines.find((l: any) => l.compte === tvaAccount && l.sens === tvaSens);
-    if (!htLine || !tvaLine) continue;
-    const ht = htLine.montant || 0;
-    const tva = tvaLine.montant || 0;
+    const htLines = lines.filter((l: any) => l.compte === htAccount && l.sens === htSens);
+    const tvaLines = lines.filter((l: any) => l.compte === tvaAccount && l.sens === tvaSens);
+    if (htLines.length === 0 || tvaLines.length === 0) continue;
+    const ht = htLines.reduce((sum: number, l: any) => sum + (l.montant || 0), 0);
+    const tva = tvaLines.reduce((sum: number, l: any) => sum + (l.montant || 0), 0);
     const expected = Math.round(ht * 0.19 * 1000) / 1000;
     const ecart = Math.round((tva - expected) * 1000) / 1000;
     const ok = Math.abs(ecart) < 0.01;
-    checks.push({ pieceRef, ht, tva, expected, ecart, ok, date: htLine.date_operation, libelle: htLine.libelle, lines });
+    checks.push({ pieceRef, ht, tva, expected, ecart, ok, date: lines[0].date_operation, libelle: lines[0].libelle, lines });
   }
 
   const allOk = checks.every(c => c.ok);
@@ -91,10 +91,25 @@ function VerificationTVA({ ecritures, journal, dossierId, reload }: { ecritures:
     setAiLoading(check.pieceRef);
     setAiResult(null);
     try {
-      const ecriText = check.lines.map((l: any) =>
-        `${l.date_operation} | ${l.numero_doc || '-'} | ${l.compte} | ${l.sens} | ${(l.montant || 0).toFixed(3)} | ${l.libelle || ''}`
-      ).join('\n');
-      const prompt = `Tu es expert comptable. Voici les ecritures d'une piece (${check.pieceRef}):\n${ecriText}\n\nVerifier: Le compte ${htAccount} (HT 19%) x 19% = ${check.expected.toFixed(3)} DT\nLe compte ${tvaAccount} (TVA 19%) = ${check.tva.toFixed(3)} DT\nEcart: ${check.ecart.toFixed(3)} DT\n\nExplique la cause de l'ecart et propose une correction.`;
+      const htLines = check.lines.filter((l: any) => l.compte === htAccount);
+      const tvaLines = check.lines.filter((l: any) => l.compte === tvaAccount);
+      const htDetail = htLines.map((l: any) => `  ${l.libelle || '-'}: ${(l.montant || 0).toFixed(3)}`).join('\n');
+      const tvaDetail = tvaLines.map((l: any) => `  ${l.libelle || '-'}: ${(l.montant || 0).toFixed(3)}`).join('\n');
+      const prompt = `EXPERT COMPTABLE - Verification TVA piece ${check.pieceRef}
+
+ECRITURES:
+${check.lines.map((l: any) => `${l.compte} ${l.sens} ${(l.montant||0).toFixed(3)} | ${l.libelle||''}`).join('\n')}
+
+VERIFICATION:
+- Total HT 19% (${htAccount}): ${check.ht.toFixed(3)} DT
+  Detail:\n${htDetail}
+- Total TVA 19% (${tvaAccount}): ${check.tva.toFixed(3)} DT
+  Detail:\n${tvaDetail}
+- HT x 19% = ${check.expected.toFixed(3)} DT
+- Ecart = ${check.ecart.toFixed(3)} DT
+
+QUESTION: Est-ce que ${check.tva.toFixed(3)} = ${check.expected.toFixed(3)}?
+Reponds en 3 lignes max: cause de l'ecart (oui/non) et correction si necessaire.`;
       const r = await fetch('https://eurex-api.ezzinesalim21.workers.dev/api/ai/verify', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt })
