@@ -400,6 +400,7 @@ export default function DossierPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'ecritures_' + (journal || 'ALL') + '_' + (dossier?.nom || id) + '.csv'; a.click();
     URL.revokeObjectURL(url);
+    await api.deleteAllEcritures(id); await api.deleteAllFactures(id); reload(true);
   };
 
   const exportXLSX = async () => {
@@ -441,6 +442,7 @@ export default function DossierPage() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Ecritures');
     XLSX.writeFile(wb, 'ecritures_' + (journal || 'ALL').replace(' ', '') + '_' + (dossier?.nom || id) + '.xlsx');
+    await api.deleteAllEcritures(id); await api.deleteAllFactures(id); reload(true);
   };
 
   if (loading) return <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>;
