@@ -206,6 +206,19 @@ export default function ScanDossierPage() {
     }
   };
 
+  const handleExportXLSX = async () => {
+    if (!id) return;
+    try {
+      const blob = await api.scan.exportXLSX(id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `scan_ecritures_${dossier?.nom || id}.xlsx`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert('Erreur export XLSX: ' + e.message);
+    }
+  };
+
   const handleDeleteFactures = async () => {
     if (!id || !confirm('Supprimer toutes les factures?')) return;
     await api.scan.deleteAllFactures(id);
@@ -482,7 +495,10 @@ export default function ScanDossierPage() {
             <p className="text-sm text-gray-500">Format: N° piece | Date | Journal | Libelle | Compte | Libelle tresorerie | Debit | Credit</p>
             <div className="flex gap-3 items-center flex-wrap">
               <button onClick={() => handleExportCSV()} className="bg-emerald-600 text-white px-4 py-2 rounded text-sm hover:bg-emerald-700">
-                <Download size={15} className="inline mr-1" /> Export VT (tous)
+                <Download size={15} className="inline mr-1" /> Export CSV
+              </button>
+              <button onClick={handleExportXLSX} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+                <Download size={15} className="inline mr-1" /> Export XLSX
               </button>
               <button onClick={handleVerify} disabled={verifying || factures.length === 0} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
                 <ShieldCheck size={15} className="inline mr-1" /> {verifying ? 'Verification...' : 'Verifier TVA 19%'}

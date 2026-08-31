@@ -1223,6 +1223,57 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         });
       }
 
+      // --- SCANFLASH: EXPORT XLSX (Axeane template) ---
+      const scanExportXlsxMatch = path.match(/^\/api\/scan\/dossiers\/([^/]+)\/export-xlsx$/);
+      if (scanExportXlsxMatch && method === 'GET') {
+        const did = scanExportXlsxMatch[1];
+        const r = await env.DB.prepare('SELECT * FROM ecritures_scan WHERE dossier_id = ? ORDER BY page, date_operation, numero_doc, compte').bind(did).all();
+
+        const XLSXMod = await import('xlsx');
+        const XLSX = XLSXMod.default || XLSXMod;
+
+        const header = ['N° pièce comptable', 'Date pièce comptable', 'Journal', 'Libellé', 'N° compte', 'Libellé trésorerie', 'Débit', 'Crédit'];
+        const rows: any[][] = [header];
+
+        for (const e of r.results as any[]) {
+          const date = e.date_operation;
+          const [y, m, d] = date.split('-');
+          const dateFormatted = `${d}/${m}/${y}`;
+          const montant = Math.round((e.montant || 0) * 1000) / 1000;
+          const debit = e.sens === 'D' ? montant : 0;
+          const credit = e.sens === 'C' ? montant : 0;
+          rows.push([e.numero_doc || '', dateFormatted, e.journal_code || 'VT', e.libelle || '', e.compte, '', debit, credit]);
+        }
+
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+
+        // Style headers: Arial Bold, centered
+        const headerStyle = { font: { name: 'Arial', bold: true }, alignment: { horizontal: 'center' } };
+        if (!ws['!cols']) ws['!cols'] = [];
+        ws['!cols'] = [
+          { wch: 30 }, // N° pièce
+          { wch: 27 }, // Date
+          { wch: 10 }, // Journal
+          { wch: 40 }, // Libellé
+          { wch: 12 }, // N° compte
+          { wch: 28 }, // Libellé trésorerie
+          { wch: 15 }, // Débit
+          { wch: 15 }, // Crédit
+        ];
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Ecritures');
+        const b64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+
+        return new Response(Uint8Array.from(atob(b64), c => c.charCodeAt(0)), {
+          headers: {
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition': `attachment; filename="scan_ecritures_${did}.xlsx"`,
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+      }
+
       // --- SCANFLASH: AUTO-CLEANUP after export ---
       const scanCleanupMatch = path.match(/^\/api\/scan\/dossiers\/([^/]+)\/cleanup$/);
       if (scanCleanupMatch && method === 'POST') {

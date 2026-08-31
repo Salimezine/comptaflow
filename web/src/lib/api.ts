@@ -89,6 +89,11 @@ export const api = {
     deleteEcriture: (eid: string) => req<any>(`/scan/ecritures/${eid}`, { method: 'DELETE' }),
     generate: (did: string) => req<any>(`/scan/dossiers/${did}/generate`, { method: 'POST', body: '{}' }),
     exportCSV: (did: string, journal?: string) => req<string>(`/scan/dossiers/${did}/export${journal ? '?journal=' + encodeURIComponent(journal) : ''}`),
+    exportXLSX: async (did: string) => {
+      const res = await fetch(`${BASE}/scan/dossiers/${did}/export-xlsx`);
+      if (!res.ok) throw new Error('Export XLSX failed');
+      return await res.blob();
+    },
     cleanup: (did: string) => req<any>(`/scan/dossiers/${did}/cleanup`, { method: 'POST', body: '{}' }),
     verifyAI: (did: string) => req<any>(`/scan/dossiers/${did}/verify-ai`, { method: 'POST', body: '{}' }),
     fixTVA: (did: string) => req<any>(`/scan/dossiers/${did}/fix-tva`, { method: 'POST', body: '{}' }),
