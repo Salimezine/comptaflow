@@ -1,26 +1,18 @@
-import { Routes, Route, Link, useLocation, useParams } from 'react-router-dom';
-import { FolderOpen } from 'lucide-react';
+import { Routes, Route, Link, useLocation } from 'react-router-dom';
 import Home from './pages/Home';
 import DossierPage from './pages/DossierPage';
 import BaudSocietes from './pages/baud/BaudSocietes';
 import BaudDossierPage from './pages/baud/BaudDossierPage';
-
-function DossierLayout() {
-  const { id } = useParams();
-  return <DossierPage />;
-}
-
-function BaudLayout() {
-  const { id } = useParams();
-  return <BaudDossierPage />;
-}
+import ScanSocietes from './pages/scanflash/ScanSocietes';
+import ScanDossierPage from './pages/scanflash/ScanDossierPage';
 
 export default function App() {
   const loc = useLocation();
   const isBaud = loc.pathname.startsWith('/baud');
+  const isScan = loc.pathname.startsWith('/scanflash');
   const isDossier = loc.pathname.startsWith('/dossier/');
   const isBaudDossier = loc.pathname.startsWith('/baud/dossier/');
-  const isHome = loc.pathname === '/';
+  const isScanDossier = loc.pathname.startsWith('/scanflash/dossier/');
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -45,6 +37,14 @@ export default function App() {
               </Link>
             </div>
           )}
+
+          {(isScan || isScanDossier) && (
+            <div className="flex gap-1 border-l pl-4">
+              <Link to="/scanflash" className="px-3 py-1.5 rounded-lg text-sm font-medium bg-emerald-50 text-emerald-700">
+                SCANFLASH
+              </Link>
+            </div>
+          )}
         </div>
       </nav>
       <main className="max-w-7xl mx-auto px-4 py-6">
@@ -53,6 +53,8 @@ export default function App() {
           <Route path="/dossier/:id" element={<DossierPage />} />
           <Route path="/baud/societes" element={<BaudSocietes />} />
           <Route path="/baud/dossier/:id" element={<BaudDossierPage />} />
+          <Route path="/scanflash" element={<ScanSocietes />} />
+          <Route path="/scanflash/dossier/:id" element={<ScanDossierPage />} />
         </Routes>
       </main>
     </div>

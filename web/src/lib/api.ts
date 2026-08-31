@@ -70,4 +70,25 @@ export const api = {
     getCorrections: (sid: string) => req<any[]>(`/baud/societes/${sid}/corrections`),
     deleteCorrection: (cid: string) => req<any>(`/baud/corrections/${cid}`, { method: 'DELETE' }),
   },
+
+  // --- SCANFLASH ---
+  scan: {
+    getSocietes: () => req<any[]>('/scan/societes'),
+    createSociete: (d: any) => req<any>('/scan/societes', { method: 'POST', body: JSON.stringify(d) }),
+    deleteSociete: (id: string) => req<any>(`/scan/societes/${id}`, { method: 'DELETE' }),
+    getDossiers: (sid: string) => req<any[]>(`/scan/societes/${sid}/dossiers`),
+    createDossier: (sid: string, d: any) => req<any>(`/scan/societes/${sid}/dossiers`, { method: 'POST', body: JSON.stringify(d) }),
+    getDossier: (did: string) => req<any>(`/scan/dossiers/${did}`),
+    deleteDossier: (did: string) => req<any>(`/scan/dossiers/${did}`, { method: 'DELETE' }),
+    getFactures: (did: string) => req<any[]>(`/scan/dossiers/${did}/factures`),
+    addFacture: (did: string, d: any) => req<any>(`/scan/dossiers/${did}/factures`, { method: 'POST', body: JSON.stringify(d) }),
+    deleteAllFactures: (did: string) => req<any>(`/scan/dossiers/${did}/factures`, { method: 'DELETE' }),
+    getEcritures: (did: string, journal?: string) => req<any[]>(`/scan/dossiers/${did}/ecritures${journal ? '?journal=' + encodeURIComponent(journal) : ''}`),
+    addEcriture: (did: string, d: any) => req<any>(`/scan/dossiers/${did}/ecritures`, { method: 'POST', body: JSON.stringify(d) }),
+    deleteAllEcritures: (did: string, journal?: string) => req<any>(`/scan/dossiers/${did}/ecritures${journal ? '?journal=' + encodeURIComponent(journal) : ''}`, { method: 'DELETE' }),
+    deleteEcriture: (eid: string) => req<any>(`/scan/ecritures/${eid}`, { method: 'DELETE' }),
+    generate: (did: string) => req<any>(`/scan/dossiers/${did}/generate`, { method: 'POST', body: '{}' }),
+    exportCSV: (did: string, journal?: string) => req<string>(`/scan/dossiers/${did}/export${journal ? '?journal=' + encodeURIComponent(journal) : ''}`),
+    cleanup: (did: string) => req<any>(`/scan/dossiers/${did}/cleanup`, { method: 'POST', body: '{}' }),
+  },
 };

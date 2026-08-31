@@ -148,7 +148,14 @@ export default {
           const ds = await env.DB.prepare('SELECT * FROM dossiers_paie WHERE societe_id = ? ORDER BY created_at DESC').bind(bs.id).all();
           for (const dd of ds.results as any[]) baudDossiers.push({ ...dd, raison_sociale: bs.nom, type: 'baud' });
         }
-        return json({ recentDossiers: recent.results, animalDossierId: animal?.id || null, baudDossiers });
+        // SCANFLASH dossiers
+        const scanSocs = await env.DB.prepare('SELECT * FROM societes_scan ORDER BY raison_sociale').all();
+        const scanDossiers: any[] = [];
+        for (const ss of scanSocs.results as any[]) {
+          const ds = await env.DB.prepare('SELECT * FROM dossiers_scan WHERE societe_id = ? ORDER BY created_at DESC').bind(ss.id).all();
+          for (const dd of ds.results as any[]) scanDossiers.push({ ...dd, raison_sociale: ss.raison_sociale, type: 'scanflash' });
+        }
+        return json({ recentDossiers: recent.results, animalDossierId: animal?.id || null, baudDossiers, scanDossiers });
       }
 
       // --- SOCIETES ---
@@ -1001,6 +1008,211 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
             'Access-Control-Allow-Origin': '*',
           },
         });
+      }
+
+      // ============================================================
+      // SCANFLASH — SCANNED INVOICE JOURNALS
+      // ============================================================
+
+      // --- SCANFLASH: SOCIETES ---
+      if (path === '/api/scan/societes' && method === 'GET') {
+        const r = await env.DB.prepare('SELECT * FROM societes_scan ORDER BY raison_sociale').all();
+        return json(r.results);
+      }
+      if (path === '/api/scan/societes' && method === 'POST') {
+        const b = await request.json() as any;
+        const id = genId();
+        await env.DB.prepare('INSERT INTO societes_scan (id, raison_sociale, matricule_fiscal) VALUES (?, ?, ?)').bind(id, b.raison_sociale, b.matricule_fiscal || null).run();
+        return json({ id, ...b });
+      }
+      const delScanSocMatch = path.match(/^\/api\/scan\/societes\/([^/]+)$/);
+      if (delScanSocMatch && method === 'DELETE') {
+        await env.DB.prepare('DELETE FROM societes_scan WHERE id = ?').bind(delScanSocMatch[1]).run();
+        return json({ ok: true });
+      }
+
+      // --- SCANFLASH: DOSSIERS ---
+      const scanDossiersListMatch = path.match(/^\/api\/scan\/societes\/([^/]+)\/dossiers$/);
+      if (scanDossiersListMatch && method === 'GET') {
+        const r = await env.DB.prepare('SELECT * FROM dossiers_scan WHERE societe_id = ? ORDER BY created_at DESC').bind(scanDossiersListMatch[1]).all();
+        return json(r.results);
+      }
+      if (scanDossiersListMatch && method === 'POST') {
+        const b = await request.json() as any;
+        const id = genId();
+        await env.DB.prepare('INSERT INTO dossiers_scan (id, societe_id, nom, mois, annee) VALUES (?, ?, ?, ?, ?)').bind(id, scanDossiersListMatch[1], b.nom || `SCAN ${b.mois}/${b.annee}`, b.mois, b.annee).run();
+        return json({ id, nom: b.nom || `SCAN ${b.mois}/${b.annee}`, mois: b.mois, annee: b.annee, statut: 'brouillon' });
+      }
+      const scanDossierGetMatch = path.match(/^\/api\/scan\/dossiers\/([^/]+)$/);
+      if (scanDossierGetMatch && method === 'GET') {
+        const d = await env.DB.prepare('SELECT * FROM dossiers_scan WHERE id = ?').bind(scanDossierGetMatch[1]).first();
+        return d ? json(d) : json({ error: 'Non trouve' }, 404);
+      }
+      if (scanDossierGetMatch && method === 'DELETE') {
+        await env.DB.prepare('DELETE FROM factures_scan WHERE dossier_id = ?').bind(scanDossierGetMatch[1]).run();
+        await env.DB.prepare('DELETE FROM ecritures_scan WHERE dossier_id = ?').bind(scanDossierGetMatch[1]).run();
+        await env.DB.prepare('DELETE FROM dossiers_scan WHERE id = ?').bind(scanDossierGetMatch[1]).run();
+        return json({ ok: true });
+      }
+
+      // --- SCANFLASH: FACTURES ---
+      const scanFacturesMatch = path.match(/^\/api\/scan\/dossiers\/([^/]+)\/factures$/);
+      if (scanFacturesMatch && method === 'GET') {
+        const r = await env.DB.prepare('SELECT * FROM factures_scan WHERE dossier_id = ? ORDER BY date_facture, numero').bind(scanFacturesMatch[1]).all();
+        return json(r.results);
+      }
+      if (scanFacturesMatch && method === 'POST') {
+        const b = await request.json() as any;
+        const id = genId();
+        await env.DB.prepare('INSERT INTO factures_scan (id, dossier_id, numero, date_facture, client, compte_client, total_ht_0, total_ht_19, tva_19, fodec, timbre, total_ttc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, scanFacturesMatch[1], b.numero, b.date_facture, b.client, b.compte_client, b.total_ht_0 || 0, b.total_ht_19 || 0, b.tva_19 || 0, b.fodec || 0, b.timbre || 0, b.total_ttc || 0).run();
+        return json({ id, ...b });
+      }
+      if (scanFacturesMatch && method === 'DELETE') {
+        await env.DB.prepare('DELETE FROM factures_scan WHERE dossier_id = ?').bind(scanFacturesMatch[1]).run();
+        return json({ ok: true });
+      }
+
+      // --- SCANFLASH: ECRITURES ---
+      const scanEcrituresMatch = path.match(/^\/api\/scan\/dossiers\/([^/]+)\/ecritures$/);
+      if (scanEcrituresMatch && method === 'GET') {
+        const journal = new URL(url).searchParams.get('journal');
+        let sql = 'SELECT * FROM ecritures_scan WHERE dossier_id = ?';
+        const params: any[] = [scanEcrituresMatch[1]];
+        if (journal) { sql += ' AND journal_code = ?'; params.push(journal); }
+        sql += ' ORDER BY page, date_operation, numero_doc, compte';
+        const r = await env.DB.prepare(sql).bind(...params).all();
+        return json(r.results);
+      }
+      if (scanEcrituresMatch && method === 'POST') {
+        const b = await request.json() as any;
+        const id = genId();
+        await env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant, page) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, scanEcrituresMatch[1], b.numero_doc, b.date_operation, b.journal_code || 'VT', b.compte, b.libelle || null, b.sens, b.montant, b.page || null).run();
+        return json({ id, ...b });
+      }
+      if (scanEcrituresMatch && method === 'DELETE') {
+        const journal = new URL(url).searchParams.get('journal');
+        let sql = 'DELETE FROM ecritures_scan WHERE dossier_id = ?';
+        const params: any[] = [scanEcrituresMatch[1]];
+        if (journal) { sql += ' AND journal_code = ?'; params.push(journal); }
+        await env.DB.prepare(sql).bind(...params).run();
+        return json({ ok: true });
+      }
+      const delScanEcrMatch = path.match(/^\/api\/scan\/ecritures\/([^/]+)$/);
+      if (delScanEcrMatch && method === 'DELETE') {
+        await env.DB.prepare('DELETE FROM ecritures_scan WHERE id = ?').bind(delScanEcrMatch[1]).run();
+        return json({ ok: true });
+      }
+
+      // --- SCANFLASH: GENERATE VT from factures ---
+      const scanGenerateMatch = path.match(/^\/api\/scan\/dossiers\/([^/]+)\/generate$/);
+      if (scanGenerateMatch && method === 'POST') {
+        const did = scanGenerateMatch[1];
+        const dossier = await env.DB.prepare('SELECT * FROM dossiers_scan WHERE id = ?').bind(did).first() as any;
+        if (!dossier) return json({ error: 'Dossier non trouve' }, 404);
+
+        // Clear existing ecritures for this dossier
+        await env.DB.prepare('DELETE FROM ecritures_scan WHERE dossier_id = ?').bind(did).run();
+
+        const factures = await env.DB.prepare('SELECT * FROM factures_scan WHERE dossier_id = ? ORDER BY date_facture, numero').bind(did).all();
+        const batch: D1PreparedStatement[] = [];
+        let ecount = 0;
+
+        for (const f of factures.results as any[]) {
+          const date = f.date_facture;
+          const facNum = f.numero || '';
+          const clientName = f.client || '';
+          const compteClient = f.compte_client || '411000';
+          const ht0 = f.total_ht_0 || 0;
+          const ht19 = f.total_ht_19 || 0;
+          const tva = f.tva_19 || 0;
+          const fodec = f.fodec || 0;
+          const timbre = f.timbre || 0;
+          const lib = `FAC ${facNum}/${clientName}`;
+
+          // 1) Client DEBIT
+          if ((ht0 + ht19 + tva + fodec + timbre) > 0) {
+            batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', compteClient, lib, 'D', Math.round((ht0 + ht19 + tva + fodec + timbre) * 1000) / 1000));
+            ecount++;
+          }
+
+          // 2) Ventes 19% CREDIT (707000)
+          if (ht19 > 0) {
+            batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '707000', lib, 'C', Math.round(ht19 * 1000) / 1000));
+            ecount++;
+          }
+
+          // 3) Ventes 0% CREDIT (707003) if applicable
+          if (ht0 > 0) {
+            batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '707003', lib, 'C', Math.round(ht0 * 1000) / 1000));
+            ecount++;
+          }
+
+          // 4) TVA 19% CREDIT (436719)
+          if (tva > 0) {
+            batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '436719', lib, 'C', Math.round(tva * 1000) / 1000));
+            ecount++;
+          }
+
+          // 5) FODEC CREDIT (436780)
+          if (fodec > 0) {
+            batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '436780', lib, 'C', Math.round(fodec * 1000) / 1000));
+            ecount++;
+          }
+
+          // 6) Timbre fiscal CREDIT (437600)
+          if (timbre > 0) {
+            batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '437600', lib, 'C', Math.round(timbre * 1000) / 1000));
+            ecount++;
+          }
+        }
+
+        // Batch insert
+        for (let i = 0; i < batch.length; i += 50) {
+          await env.DB.batch(batch.slice(i, i + 50));
+        }
+
+        // Update dossier count
+        await env.DB.prepare('UPDATE dossiers_scan SET nb_pieces = ?, nb_ecritures = ?, statut = ? WHERE id = ?').bind((factures.results as any[]).length, ecount, 'traite', did).run();
+
+        return json({ ok: true, factures: (factures.results as any[]).length, ecritures: ecount });
+      }
+
+      // --- SCANFLASH: EXPORT CSV ---
+      const scanExportMatch = path.match(/^\/api\/scan\/dossiers\/([^/]+)\/export$/);
+      if (scanExportMatch && method === 'GET') {
+        const did = scanExportMatch[1];
+        const journal = new URL(url).searchParams.get('journal');
+        let sql = 'SELECT * FROM ecritures_scan WHERE dossier_id = ?';
+        const params: any[] = [did];
+        if (journal) { sql += ' AND journal_code = ?'; params.push(journal); }
+        sql += ' ORDER BY page, date_operation, numero_doc, compte';
+        const r = await env.DB.prepare(sql).bind(...params).all();
+        const lines: string[] = [];
+        for (const e of r.results as any[]) {
+          const date = e.date_operation; // YYYY-MM-DD
+          const [y, m, d] = date.split('-');
+          const dateFormatted = `${d}/${m}/${y}`;
+          const montant = Math.round((e.montant || 0) * 1000) / 1000;
+          const debit = e.sens === 'D' ? montant.toFixed(3) : '0.000';
+          const credit = e.sens === 'C' ? montant.toFixed(3) : '0.000';
+          lines.push(`${e.numero_doc || ''}\t${dateFormatted}\t${e.journal_code || 'VT'}\t${e.libelle || ''}\t${e.compte}\t\t${debit}\t${credit}`);
+        }
+        return new Response(lines.join('\n'), {
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': `attachment; filename="scan_export_${did}.csv"`,
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+      }
+
+      // --- SCANFLASH: AUTO-CLEANUP after export ---
+      const scanCleanupMatch = path.match(/^\/api\/scan\/dossiers\/([^/]+)\/cleanup$/);
+      if (scanCleanupMatch && method === 'POST') {
+        const did = scanCleanupMatch[1];
+        await env.DB.prepare('DELETE FROM ecritures_scan WHERE dossier_id = ?').bind(did).run();
+        await env.DB.prepare('DELETE FROM factures_scan WHERE dossier_id = ?').bind(did).run();
+        return json({ ok: true });
       }
 
       return json({ error: 'Not found: ' + path }, 404);
