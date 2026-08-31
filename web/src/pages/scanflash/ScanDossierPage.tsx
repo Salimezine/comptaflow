@@ -175,7 +175,7 @@ export default function ScanDossierPage() {
   const tabs: { key: Tab; label: string; icon: any; count: number }[] = [
     { key: 'factures', label: 'Factures', icon: FileText, count: factures.length },
     { key: 'ecritures', label: 'Ecritures VT', icon: Table2, count: ecritures.length },
-    { key: 'export', label: 'Export', icon: Download, count: 0 },
+    { key: 'export', label: 'Export', icon: Download, count: ecritures.length },
   ];
 
   return (
@@ -294,16 +294,45 @@ export default function ScanDossierPage() {
       {/* Tab: Ecritures */}
       {tab === 'ecritures' && (
         <div className="space-y-4">
-          {ecritures.length > 0 && (
-            <div className="flex gap-2">
-              <button onClick={() => handleExportCSV()} className="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700">
-                <Download size={14} className="inline mr-1" /> Export CSV VT
-              </button>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => handleExportCSV()} className="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700">
+              <Download size={14} className="inline mr-1" /> Export CSV VT
+            </button>
+            {ecritures.length > 0 && (
               <button onClick={() => handleDeleteEcritures()} className="text-red-400 hover:text-red-600 text-sm border border-red-200 px-3 py-1.5 rounded">
                 <Trash2 size={14} className="inline mr-1" /> Supprimer ecritures
               </button>
+            )}
+          </div>
+
+          {/* Manual add ecriture */}
+          <div className="bg-white rounded-lg border p-4">
+            <h3 className="font-semibold text-gray-700 mb-3 text-sm">Ajouter une ecriture</h3>
+            <div className="grid grid-cols-6 gap-2 text-sm">
+              <input type="date" id="ecr-date" className="border rounded px-2 py-1.5" defaultValue={dossier?.mois ? `${dossier.annee}-${String(dossier.mois).padStart(2,'0')}-01` : ''} />
+              <input placeholder="N° Piece" id="ecr-piece" className="border rounded px-2 py-1.5" />
+              <input placeholder="Compte" id="ecr-compte" className="border rounded px-2 py-1.5" />
+              <input placeholder="Libelle" id="ecr-libelle" className="border rounded px-2 py-1.5" />
+              <select id="ecr-sens" className="border rounded px-2 py-1.5">
+                <option value="D">Debit</option>
+                <option value="C">Credit</option>
+              </select>
+              <input placeholder="Montant" type="number" step="0.001" id="ecr-montant" className="border rounded px-2 py-1.5" />
+              <button onClick={async () => {
+                const date = (document.getElementById('ecr-date') as HTMLInputElement).value;
+                const piece = (document.getElementById('ecr-piece') as HTMLInputElement).value;
+                const compte = (document.getElementById('ecr-compte') as HTMLInputElement).value;
+                const libelle = (document.getElementById('ecr-libelle') as HTMLInputElement).value;
+                const sens = (document.getElementById('ecr-sens') as HTMLSelectElement).value;
+                const montant = parseFloat((document.getElementById('ecr-montant') as HTMLInputElement).value) || 0;
+                if (!id || !date || !compte || montant <= 0) return alert('Remplir tous les champs');
+                await api.scan.addEcriture(id, { date_operation: date, numero_doc: piece, compte, libelle, sens, montant, journal_code: 'VT' });
+                (document.getElementById('ecr-montant') as HTMLInputElement).value = '';
+                load(true);
+              }} className="bg-emerald-500 text-white rounded px-3 py-1.5 hover:bg-emerald-600">+</button>
             </div>
-          )}
+          </div>
+
           <div className="bg-white rounded-lg border overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-600">
@@ -316,6 +345,7 @@ export default function ScanDossierPage() {
                   <th className="px-3 py-2 text-center">D/C</th>
                   <th className="px-3 py-2 text-right">Debit</th>
                   <th className="px-3 py-2 text-right">Credit</th>
+                  <th className="px-3 py-2"></th>
                 </tr>
               </thead>
               <tbody>
@@ -331,9 +361,12 @@ export default function ScanDossierPage() {
                     </td>
                     <td className="px-3 py-1.5 text-right font-mono text-xs">{e.sens === 'D' ? (e.montant || 0).toFixed(3) : ''}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-xs">{e.sens === 'C' ? (e.montant || 0).toFixed(3) : ''}</td>
+                    <td className="px-1">
+                      <button onClick={async () => { if (confirm('Supprimer?')) { await api.scan.deleteEcriture(e.id); load(true); } }} className="text-red-400 hover:text-red-600"><Trash2 size={12} /></button>
+                    </td>
                   </tr>
                 ))}
-                {ecritures.length === 0 && <tr><td colSpan={8} className="text-center text-gray-400 py-6">Aucune ecriture — cliquez "Generer VT"</td></tr>}
+                {ecritures.length === 0 && <tr><td colSpan={9} className="text-center text-gray-400 py-6">Aucune ecriture</td></tr>}
               </tbody>
             </table>
           </div>
@@ -346,11 +379,31 @@ export default function ScanDossierPage() {
           <div className="bg-white rounded-lg border p-6 space-y-4">
             <h3 className="font-semibold text-gray-700">Export CSV / Axeane</h3>
             <p className="text-sm text-gray-500">Format: N° piece | Date | Journal | Libelle | Compte | Libelle tresorerie | Debit | Credit</p>
-            <div className="flex gap-3">
+            <div className="flex gap-3 items-center">
               <button onClick={() => handleExportCSV()} className="bg-emerald-600 text-white px-4 py-2 rounded text-sm hover:bg-emerald-700">
                 <Download size={15} className="inline mr-1" /> Export VT (tous)
               </button>
+              <span className="text-sm text-gray-500">{ecritures.length} ecritures a exporter</span>
             </div>
+            {ecritures.length > 0 && (
+              <div className="bg-gray-50 rounded p-3 text-xs text-gray-600 max-h-48 overflow-auto">
+                <table className="w-full">
+                  <thead><tr className="text-gray-500"><th className="text-left pr-3">Date</th><th className="text-left pr-3">Piece</th><th className="text-left pr-3">Compte</th><th className="text-right pr-3">D</th><th className="text-right">C</th></tr></thead>
+                  <tbody>
+                    {ecritures.slice(0, 30).map(e => (
+                      <tr key={e.id} className="border-t border-gray-200">
+                        <td className="pr-3">{e.date_operation}</td>
+                        <td className="pr-3 font-mono">{e.numero_doc}</td>
+                        <td className="pr-3 font-mono">{e.compte}</td>
+                        <td className="pr-3 text-right font-mono">{e.sens === 'D' ? (e.montant || 0).toFixed(3) : ''}</td>
+                        <td className="text-right font-mono">{e.sens === 'C' ? (e.montant || 0).toFixed(3) : ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {ecritures.length > 30 && <div className="text-gray-400 mt-1">... {ecritures.length - 30} lignes de plus</div>}
+              </div>
+            )}
           </div>
 
           <div className="bg-white rounded-lg border p-6">
