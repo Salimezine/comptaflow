@@ -28,7 +28,7 @@ export default function App() {
               <span className="text-lg font-bold">EUREX</span>
             </Link>
             <div className="flex gap-1 border-l pl-4">
-              <Link to="/" className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${!isBaud ? 'bg-blue-50 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}>
+              <Link to="/dossier/dossier_animal" className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${!isBaud ? 'bg-blue-50 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}>
                 ANIMALS
               </Link>
               <Link to="/baud/societes" className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${isBaud ? 'bg-purple-50 text-purple-700' : 'text-gray-500 hover:bg-gray-100'}`}>

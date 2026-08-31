@@ -12,11 +12,11 @@ export default function Home() {
     timerRef.current = setInterval(() => setElapsed(e => e + 1), 1000);
 
     api.dashboard().then((d: any) => {
+      clearInterval(timerRef.current);
       if (d.animalDossierId) {
         nav(`/dossier/${d.animalDossierId}`, { replace: true });
       } else {
         setStatus('Aucun dossier. Creez un dossier pour commencer.');
-        clearInterval(timerRef.current);
       }
     }).catch(() => {
       setStatus('Serveur en cours de demarrage, patientez...');
