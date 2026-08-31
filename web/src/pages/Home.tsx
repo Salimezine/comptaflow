@@ -14,6 +14,9 @@ export default function Home() {
     api.dashboard().then((d: any) => {
       if (d.animalDossierId) {
         nav(`/dossier/${d.animalDossierId}`, { replace: true });
+      } else {
+        setStatus('Aucun dossier. Creez un dossier pour commencer.');
+        clearInterval(timerRef.current);
       }
     }).catch(() => {
       setStatus('Serveur en cours de demarrage, patientez...');
