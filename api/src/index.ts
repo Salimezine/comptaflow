@@ -1064,7 +1064,7 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
       if (scanFacturesMatch && method === 'POST') {
         const b = await request.json() as any;
         const id = genId();
-        await env.DB.prepare('INSERT INTO factures_scan (id, dossier_id, numero, date_facture, client, compte_client, total_ht_0, total_ht_19, tva_19, fodec, timbre, total_ttc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, scanFacturesMatch[1], b.numero, b.date_facture, b.client, b.compte_client, b.total_ht_0 || 0, b.total_ht_19 || 0, b.tva_19 || 0, b.fodec || 0, b.timbre || 0, b.total_ttc || 0).run();
+        await env.DB.prepare('INSERT INTO factures_scan (id, dossier_id, numero, date_facture, client, code_client, compte_client, is_avoir, total_ht_0, total_ht_19, tva_19, fodec, timbre, total_ttc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, scanFacturesMatch[1], b.numero, b.date_facture, b.client, b.code_client || null, b.compte_client, b.is_avoir ? 1 : 0, b.total_ht_0 || 0, b.total_ht_19 || 0, b.tva_19 || 0, b.fodec || 0, b.timbre || 0, b.total_ttc || 0).run();
         return json({ id, ...b });
       }
       if (scanFacturesMatch && method === 'DELETE') {
@@ -1127,42 +1127,59 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
           const tva = f.tva_19 || 0;
           const fodec = f.fodec || 0;
           const timbre = f.timbre || 0;
-          const lib = `FAC ${facNum}/${clientName}`;
+          const isAvoir = !!f.is_avoir;
+          const prefix = isAvoir ? 'AVR' : 'FAC';
+          const lib = `${prefix} ${facNum}/${clientName}`;
+          const ttc = ht0 + ht19 + tva + fodec + timbre;
 
-          // 1) Client DEBIT
-          if ((ht0 + ht19 + tva + fodec + timbre) > 0) {
-            batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', compteClient, lib, 'D', Math.round((ht0 + ht19 + tva + fodec + timbre) * 1000) / 1000));
-            ecount++;
-          }
-
-          // 2) Ventes 19% CREDIT (707000)
-          if (ht19 > 0) {
-            batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '707000', lib, 'C', Math.round(ht19 * 1000) / 1000));
-            ecount++;
-          }
-
-          // 3) Ventes 0% CREDIT (707003) if applicable
-          if (ht0 > 0) {
-            batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '707003', lib, 'C', Math.round(ht0 * 1000) / 1000));
-            ecount++;
-          }
-
-          // 4) TVA 19% CREDIT (436719)
-          if (tva > 0) {
-            batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '436719', lib, 'C', Math.round(tva * 1000) / 1000));
-            ecount++;
-          }
-
-          // 5) FODEC CREDIT (436780)
-          if (fodec > 0) {
-            batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '436780', lib, 'C', Math.round(fodec * 1000) / 1000));
-            ecount++;
-          }
-
-          // 6) Timbre fiscal CREDIT (437600)
-          if (timbre > 0) {
-            batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '437600', lib, 'C', Math.round(timbre * 1000) / 1000));
-            ecount++;
+          if (isAvoir) {
+            // AVR: Client CREDIT, Sales/TVa/FODEC DEBIT (inverse of FAC)
+            if (ttc > 0) {
+              batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', compteClient, lib, 'C', Math.round(ttc * 1000) / 1000));
+              ecount++;
+            }
+            if (ht19 > 0) {
+              batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '707000', lib, 'D', Math.round(ht19 * 1000) / 1000));
+              ecount++;
+            }
+            if (ht0 > 0) {
+              batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '707003', lib, 'D', Math.round(ht0 * 1000) / 1000));
+              ecount++;
+            }
+            if (tva > 0) {
+              batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '436719', lib, 'D', Math.round(tva * 1000) / 1000));
+              ecount++;
+            }
+            if (fodec > 0) {
+              batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '436780', lib, 'D', Math.round(fodec * 1000) / 1000));
+              ecount++;
+            }
+          } else {
+            // FAC: Client DEBIT, Sales/TVa/FODEC/Timbre CREDIT
+            if (ttc > 0) {
+              batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', compteClient, lib, 'D', Math.round(ttc * 1000) / 1000));
+              ecount++;
+            }
+            if (ht19 > 0) {
+              batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '707000', lib, 'C', Math.round(ht19 * 1000) / 1000));
+              ecount++;
+            }
+            if (ht0 > 0) {
+              batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '707003', lib, 'C', Math.round(ht0 * 1000) / 1000));
+              ecount++;
+            }
+            if (tva > 0) {
+              batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '436719', lib, 'C', Math.round(tva * 1000) / 1000));
+              ecount++;
+            }
+            if (fodec > 0) {
+              batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '436780', lib, 'C', Math.round(fodec * 1000) / 1000));
+              ecount++;
+            }
+            if (timbre > 0) {
+              batch.push(env.DB.prepare('INSERT INTO ecritures_scan (id, dossier_id, numero_doc, date_operation, journal_code, compte, libelle, sens, montant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(genId(), did, facNum, date, 'VT', '437600', lib, 'C', Math.round(timbre * 1000) / 1000));
+              ecount++;
+            }
           }
         }
 

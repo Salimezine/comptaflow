@@ -55,60 +55,101 @@ export default function ScanDossierPage() {
     setUploading(false);
   };
 
+  // Client code → 411XXX account mapping (stored in localStorage)
+  const [clientMap, setClientMap] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem('scan_client_map') || '{}'); } catch { return {}; }
+  });
+  const [newClientCode, setNewClientCode] = useState('');
+  const [newClientAccount, setNewClientAccount] = useState('');
+  const [newClientName, setNewClientName] = useState('');
+
+  const saveClientMap = (map: Record<string, string>) => {
+    setClientMap(map);
+    localStorage.setItem('scan_client_map', JSON.stringify(map));
+  };
+
+  const parseAmount = (s: string): number => {
+    // "1 560,391" → 1560.391, "-299,438" → -299.438
+    return parseFloat(s.replace(/\s/g, '').replace(',', '.')) || 0;
+  };
+
   const parseScanInvoice = (text: string): any | null => {
-    // Try to extract invoice data from PDF text
-    // Format: look for account numbers, client name, amounts
     const lines = text.split('\n');
     let numero = '';
+    let isAvoir = false;
     let date = '';
-    let client = '';
-    let compteClient = '';
-    let totalHT0 = 0;
-    let totalHT19 = 0;
+    let codeClient = '';
+    let clientName = '';
+    let totalHT = 0;
     let tva19 = 0;
     let fodec = 0;
     let timbre = 0;
+    let totalTTC = 0;
+    let afterAdressA = false;
 
-    for (const line of lines) {
-      // FAC N°XXXX-26
-      const facMatch = line.match(/FAC\s*N[°o]?\s*(\d+[-\/]\d+)/i);
-      if (facMatch) numero = facMatch[1].replace('/', '-');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
 
-      // Date DD/MM/YYYY
-      const dateMatch = line.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      if (dateMatch && !date) date = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
-
-      // Client account 411XXX
-      const acctMatch = line.match(/\b(411\d{3})\b\s+(.+)/);
-      if (acctMatch) {
-        compteClient = acctMatch[1];
-        client = acctMatch[2].trim();
+      // "Facture FAC2606-00001989" or "Facture avoir AVR2606-000029"
+      const facMatch = line.match(/^Facture\s+(avoir\s+)?(FAC|AVR)\S+/i);
+      if (facMatch) {
+        isAvoir = !!facMatch[1];
+        numero = line.replace(/^Facture\s+(avoir\s+)?/i, '').trim();
       }
 
-      // HT 19% (707000)
-      const ht19Match = line.match(/\b707000\b\s+([\d\s]*[,\.]\d{1,3})/);
-      if (ht19Match) totalHT19 = parseFloat(ht19Match[1].replace(/\s/g, '').replace(',', '.'));
+      // "Date facturation : 05/06/2026"
+      const dateMatch = line.match(/Date\s+facturation\s*:\s*(\d{2})\/(\d{2})\/(\d{4})/i);
+      if (dateMatch) date = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
 
-      // TVA 19% (436719)
-      const tvaMatch = line.match(/\b436719\b\s+([\d\s]*[,\.]\d{1,3})/);
-      if (tvaMatch) tva19 = parseFloat(tvaMatch[1].replace(/\s/g, '').replace(',', '.'));
+      // "Code client : CLT0626-1187"
+      const codeMatch = line.match(/Code\s+client\s*:\s*(\S+)/i);
+      if (codeMatch) codeClient = codeMatch[1];
 
-      // FODEC (436780)
-      const fodecMatch = line.match(/\b436780\b\s+([\d\s]*[,\.]\d{1,3})/);
-      if (fodecMatch) fodec = parseFloat(fodecMatch[1].replace(/\s/g, '').replace(',', '.'));
+      // Client name after "Adressé à"
+      if (line.match(/Adress[ée]\s+[àa]/i)) { afterAdressA = true; continue; }
+      if (afterAdressA && line && !line.match(/^(Numéro|Tél|Email|Web|Scan)/i)) {
+        clientName = line;
+        afterAdressA = false;
+      }
 
-      // Timbre (437600)
-      const timbreMatch = line.match(/\b437600\b\s+([\d\s]*[,\.]\d{1,3})/);
-      if (timbreMatch) timbre = parseFloat(timbreMatch[1].replace(/\s/g, '').replace(',', '.'));
+      // "Total HT" "279,000" or "Total HT" "-1 560,391"
+      if (line.match(/^Total\s+HT$/i) && i + 1 < lines.length) {
+        totalHT = parseAmount(lines[i + 1].trim());
+      }
+
+      // "Total TVA 19%" "53,541"
+      if (line.match(/^Total\s+TVA\s+19\s*%$/i) && i + 1 < lines.length) {
+        tva19 = parseAmount(lines[i + 1].trim());
+      }
+
+      // "FODEC 1%" "2,790"
+      if (line.match(/^FODEC\s+1\s*%$/i) && i + 1 < lines.length) {
+        fodec = parseAmount(lines[i + 1].trim());
+      }
+
+      // "Timbre fiscal" "1,000"
+      if (line.match(/^Timbre\s+fiscal$/i) && i + 1 < lines.length) {
+        timbre = parseAmount(lines[i + 1].trim());
+      }
+
+      // "Total TTC" "336,331"
+      if (line.match(/^Total\s+TTC$/i) && i + 1 < lines.length) {
+        totalTTC = parseAmount(lines[i + 1].trim());
+      }
     }
 
     if (!numero || !date) return null;
 
-    const totalTTC = totalHT0 + totalHT19 + tva19 + fodec + timbre;
+    // Map code_client → 411XXX
+    const compteClient = clientMap[codeClient] || '411000';
+
     return {
-      numero, date_facture: date, client, compte_client: compteClient,
-      total_ht_0: totalHT0, total_ht_19: totalHT19, tva_19: tva19,
-      fodec, timbre, total_ttc: totalTTC,
+      numero, date_facture: date, client: clientName || codeClient, code_client: codeClient,
+      compte_client: compteClient, is_avoir: isAvoir,
+      total_ht_0: 0, total_ht_19: Math.abs(totalHT),
+      tva_19: Math.abs(tva19), fodec: Math.abs(fodec),
+      timbre: isAvoir ? 0 : Math.abs(timbre),
+      total_ttc: Math.abs(totalTTC),
     };
   };
 
@@ -223,6 +264,31 @@ export default function ScanDossierPage() {
             </div>
           </div>
 
+          {/* Client mapping */}
+          <div className="bg-white rounded-lg border p-4">
+            <h3 className="font-semibold text-gray-700 mb-3 text-sm">Mapping Code Client → Compte 411XXX</h3>
+            <div className="flex gap-2 items-end mb-2">
+              <input placeholder="Code client (ex: CLT0626-1187)" value={newClientCode} onChange={e => setNewClientCode(e.target.value)} className="flex-1 border rounded px-2 py-1.5 text-sm" />
+              <input placeholder="Compte 411XXX" value={newClientAccount} onChange={e => setNewClientAccount(e.target.value)} className="w-32 border rounded px-2 py-1.5 text-sm" />
+              <input placeholder="Nom (optionnel)" value={newClientName} onChange={e => setNewClientName(e.target.value)} className="flex-1 border rounded px-2 py-1.5 text-sm" />
+              <button onClick={() => {
+                if (!newClientCode.trim() || !newClientAccount.trim()) return;
+                saveClientMap({ ...clientMap, [newClientCode.trim()]: newClientAccount.trim() });
+                setNewClientCode(''); setNewClientAccount(''); setNewClientName('');
+              }} className="bg-emerald-500 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-600">+</button>
+            </div>
+            {Object.keys(clientMap).length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {Object.entries(clientMap).map(([code, acct]) => (
+                  <span key={code} className="inline-flex items-center gap-1 bg-gray-100 text-xs px-2 py-1 rounded">
+                    {code} → {acct}
+                    <button onClick={() => { const m = { ...clientMap }; delete m[code]; saveClientMap(m); }} className="text-red-400 hover:text-red-600">×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Manual add */}
           <div className="bg-white rounded-lg border p-4">
             <h3 className="font-semibold text-gray-700 mb-3 text-sm">Ajouter manuellement</h3>
@@ -249,8 +315,8 @@ export default function ScanDossierPage() {
                   <th className="px-3 py-2 text-left">N°</th>
                   <th className="px-3 py-2 text-left">Date</th>
                   <th className="px-3 py-2 text-left">Client</th>
+                  <th className="px-3 py-2 text-left">Code</th>
                   <th className="px-3 py-2 text-left">Compte</th>
-                  <th className="px-3 py-2 text-right">HT 0%</th>
                   <th className="px-3 py-2 text-right">HT 19%</th>
                   <th className="px-3 py-2 text-right">TVA</th>
                   <th className="px-3 py-2 text-right">FODEC</th>
@@ -261,11 +327,13 @@ export default function ScanDossierPage() {
               <tbody>
                 {factures.map(f => (
                   <tr key={f.id} className="border-t hover:bg-gray-50">
-                    <td className="px-3 py-1.5 font-mono text-xs">{f.numero}</td>
+                    <td className="px-3 py-1.5 font-mono text-xs">
+                      {f.is_avoir ? <span className="text-red-600 font-bold">AVR</span> : 'FAC'} {f.numero}
+                    </td>
                     <td className="px-3 py-1.5 text-xs">{f.date_facture}</td>
-                    <td className="px-3 py-1.5">{f.client}</td>
+                    <td className="px-3 py-1.5 text-xs">{f.client}</td>
+                    <td className="px-3 py-1.5 font-mono text-xs text-gray-500">{f.code_client}</td>
                     <td className="px-3 py-1.5 font-mono text-xs">{f.compte_client}</td>
-                    <td className="px-3 py-1.5 text-right font-mono">{(f.total_ht_0 || 0).toFixed(3)}</td>
                     <td className="px-3 py-1.5 text-right font-mono">{(f.total_ht_19 || 0).toFixed(3)}</td>
                     <td className="px-3 py-1.5 text-right font-mono">{(f.tva_19 || 0).toFixed(3)}</td>
                     <td className="px-3 py-1.5 text-right font-mono">{(f.fodec || 0).toFixed(3)}</td>
