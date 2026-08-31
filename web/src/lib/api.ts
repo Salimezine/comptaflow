@@ -90,5 +90,7 @@ export const api = {
     generate: (did: string) => req<any>(`/scan/dossiers/${did}/generate`, { method: 'POST', body: '{}' }),
     exportCSV: (did: string, journal?: string) => req<string>(`/scan/dossiers/${did}/export${journal ? '?journal=' + encodeURIComponent(journal) : ''}`),
     cleanup: (did: string) => req<any>(`/scan/dossiers/${did}/cleanup`, { method: 'POST', body: '{}' }),
+    verifyAI: (did: string) => req<any>(`/scan/dossiers/${did}/verify-ai`, { method: 'POST', body: '{}' }),
+    fixTVA: (did: string) => req<any>(`/scan/dossiers/${did}/fix-tva`, { method: 'POST', body: '{}' }),
   },
 };

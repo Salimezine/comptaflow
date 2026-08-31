@@ -1232,6 +1232,162 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         return json({ ok: true });
       }
 
+      // --- SCANFLASH: VERIFY TVA 19% ---
+      const scanVerifyMatch = path.match(/^\/api\/scan\/dossiers\/([^/]+)\/verify-ai$/);
+      if (scanVerifyMatch && method === 'POST') {
+        const did = scanVerifyMatch[1];
+        const factures = await env.DB.prepare('SELECT * FROM factures_scan WHERE dossier_id = ? ORDER BY date_facture, numero').bind(did).all();
+        if (!factures.results.length) return json({ error: 'Aucune facture' }, 400);
+
+        const checks: any[] = [];
+        let errors = 0;
+        let totalHT = 0, totalTVA = 0, totalFODEC = 0, totalTimbre = 0, totalTTC = 0;
+
+        for (const f of factures.results as any[]) {
+          const ht19 = f.total_ht_19 || 0;
+          const tvaExpected = Math.round(ht19 * 19) / 100;
+          const tvaActual = f.tva_19 || 0;
+          const tvaDiff = Math.abs(tvaActual - tvaExpected);
+          const fodecExpected = Math.round(ht19 * 1) / 100;
+          const fodecActual = f.fodec || 0;
+          const fodecDiff = Math.abs(fodecActual - fodecExpected);
+          const ttcComputed = (f.total_ht_0 || 0) + ht19 + tvaActual + fodecActual + (f.timbre || 0);
+          const ttcDiff = Math.abs(f.total_ttc || 0) - ttcComputed;
+
+          totalHT += (f.total_ht_0 || 0) + ht19;
+          totalTVA += tvaActual;
+          totalFODEC += fodecActual;
+          totalTimbre += f.timbre || 0;
+          totalTTC += f.total_ttc || 0;
+
+          const pieceChecks: any[] = [];
+          if (tvaDiff > 0.01) {
+            pieceChecks.push({ name: 'TVA', status: 'error', detail: `TVA ${tvaActual} ≠ HT×19% = ${tvaExpected} (ecart ${tvaDiff.toFixed(3)})`, expected: tvaExpected, actual: tvaActual });
+            errors++;
+          } else {
+            pieceChecks.push({ name: 'TVA', status: 'ok', detail: `TVA ${tvaActual} = HT×19% = ${tvaExpected}` });
+          }
+          if (fodecDiff > 0.01) {
+            pieceChecks.push({ name: 'FODEC', status: 'error', detail: `FODEC ${fodecActual} ≠ HT×1% = ${fodecExpected} (ecart ${fodecDiff.toFixed(3)})`, expected: fodecExpected, actual: fodecActual });
+            errors++;
+          } else {
+            pieceChecks.push({ name: 'FODEC', status: 'ok', detail: `FODEC ${fodecActual} = HT×1% = ${fodecExpected}` });
+          }
+          if (Math.abs(ttcDiff) > 0.01) {
+            pieceChecks.push({ name: 'TTC', status: 'error', detail: `TTC declare ${f.total_ttc} ≠ calcule ${ttcComputed} (ecart ${ttcDiff.toFixed(3)})`, expected: ttcComputed, actual: f.total_ttc });
+            errors++;
+          } else {
+            pieceChecks.push({ name: 'TTC', status: 'ok', detail: `TTC ${f.total_ttc} = somme lignes` });
+          }
+          checks.push({ piece: f.numero, type: f.is_avoir ? 'AVR' : 'FAC', client: f.client, checks: pieceChecks });
+        }
+
+        // Build prompt for AI
+        const facturesText = (factures.results as any[]).map(f => {
+          const ht19 = f.total_ht_19 || 0;
+          const tvaExpected = Math.round(ht19 * 19) / 100;
+          return `${f.numero} ${f.is_avoir ? 'AVR' : 'FAC'} ${f.client}: HT19=${ht19} TVA=${f.tva_19} (expected=${tvaExpected}) FODEC=${f.fodec} Timbre=${f.timbre} TTC=${f.total_ttc}`;
+        }).join('\n');
+
+        const prompt = `Tu es un expert-comptable tunisien. Verifie ces factures SCANFLASH.
+
+REGLES:
+- TVA 19% = HT × 19%
+- FODEC 1% = HT × 1%
+- Timbre fiscal = 1.000 DT (fixe, toujours present sur FAC)
+- TTC = HT + TVA + FODEC + Timbre
+- FAC: client DOIT (D), ventes/tva/fodec/timbre = CREDIT
+- AVR: client CREDITE (C), ventes/tva/fodec/timbre = DEBIT
+
+FACTURES:
+${facturesText}
+
+TOTAL: HT=${totalHT.toFixed(3)} TVA=${totalTVA.toFixed(3)} FODEC=${totalFODEC.toFixed(3)} Timbre=${totalTimbre.toFixed(3)} TTC=${totalTTC.toFixed(3)}
+
+JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"piece":"...","type":"FAC/AVR","status":"ok/error","detail":"..."}],"summary":"..."}`;
+
+        let aiReport: any;
+        try {
+          const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
+            messages: [
+              { role: 'system', content: 'Reponds toujours en JSON valide.' },
+              { role: 'user', content: prompt }
+            ],
+            max_tokens: 2000,
+            temperature: 0.1,
+          });
+          const raw = aiResponse?.response || aiResponse?.result?.response || aiResponse;
+          if (typeof raw === 'string') {
+            const jsonMatch = raw.match(/\{[\s\S]*\}/);
+            aiReport = jsonMatch ? JSON.parse(jsonMatch[0]) : { verdict: errors > 0 ? 'ERREUR' : 'OK', summary: raw };
+          } else {
+            aiReport = raw;
+          }
+        } catch (aiErr: any) {
+          aiReport = { verdict: errors > 0 ? 'ERREUR' : 'OK', summary: 'AI error: ' + aiErr.message };
+        }
+
+        return json({
+          ok: true,
+          verdict: errors > 0 ? 'ERREUR' : 'OK',
+          errors,
+          totalFactures: factures.results.length,
+          totals: { ht: totalHT, tva: totalTVA, fodec: totalFODEC, timbre: totalTimbre, ttc: totalTTC },
+          checks,
+          ai: aiReport,
+        });
+      }
+
+      // --- SCANFLASH: FIX TVA ---
+      const scanFixTvaMatch = path.match(/^\/api\/scan\/dossiers\/([^/]+)\/fix-tva$/);
+      if (scanFixTvaMatch && method === 'POST') {
+        const did = scanFixTvaMatch[1];
+        const factures = await env.DB.prepare('SELECT * FROM factures_scan WHERE dossier_id = ? ORDER BY date_facture, numero').bind(did).all();
+        if (!factures.results.length) return json({ error: 'Aucune facture' }, 400);
+
+        let fixed = 0;
+        const batch: D1PreparedStatement[] = [];
+
+        for (const f of factures.results as any[]) {
+          const ht19 = f.total_ht_19 || 0;
+          const tvaExpected = Math.round(ht19 * 19) / 100;
+          const tvaActual = f.tva_19 || 0;
+          if (Math.abs(tvaActual - tvaExpected) > 0.01) {
+            const diff = tvaExpected - tvaActual;
+            const newTTC = (f.total_ttc || 0) + diff;
+            batch.push(env.DB.prepare('UPDATE factures_scan SET tva_19 = ?, total_ttc = ? WHERE id = ?').bind(tvaExpected, newTTC, f.id));
+            fixed++;
+          }
+        }
+
+        if (batch.length > 0) {
+          for (let i = 0; i < batch.length; i += 50) {
+            await env.DB.batch(batch.slice(i, i + 50));
+          }
+        }
+
+        // Also update ecritures: find 436719 lines and fix amounts
+        const ecritures = await env.DB.prepare('SELECT * FROM ecritures_scan WHERE dossier_id = ? AND compte = ?').bind(did, '436719').all();
+        const ecrBatch: D1PreparedStatement[] = [];
+        for (const e of ecritures.results as any[]) {
+          // Find the matching facture
+          const fac = (factures.results as any[]).find(f => f.numero === e.numero_doc);
+          if (fac) {
+            const newTVA = Math.round((fac.total_ht_19 || 0) * 19) / 100;
+            if (Math.abs(e.montant - newTVA) > 0.01) {
+              ecrBatch.push(env.DB.prepare('UPDATE ecritures_scan SET montant = ? WHERE id = ?').bind(newTVA, e.id));
+            }
+          }
+        }
+        if (ecrBatch.length > 0) {
+          for (let i = 0; i < ecrBatch.length; i += 50) {
+            await env.DB.batch(ecrBatch.slice(i, i + 50));
+          }
+        }
+
+        return json({ ok: true, fixed, ecrituresFixed: ecrBatch.length });
+      }
+
       return json({ error: 'Not found: ' + path }, 404);
     } catch (e: any) {
       return json({ error: e.message || 'Internal error' }, 500);

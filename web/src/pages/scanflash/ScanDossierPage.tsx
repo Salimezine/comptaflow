@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, Table2, Trash2, Download, Zap, Upload, CheckCircle } from 'lucide-react';
+import { ArrowLeft, FileText, Table2, Trash2, Download, Zap, Upload, CheckCircle, ShieldCheck, Wrench } from 'lucide-react';
 import { api } from '../../lib/api';
 import { extractTextFromPDF } from '../../lib/pdf';
 
@@ -16,6 +16,8 @@ export default function ScanDossierPage() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<any>(null);
 
   // Manual add form
   const [form, setForm] = useState({ numero: '', date_facture: '', client: '', compte_client: '', total_ht_0: '0', total_ht_19: '0', tva_19: '0', fodec: '0', timbre: '0', total_ttc: '0' });
@@ -214,6 +216,31 @@ export default function ScanDossierPage() {
     if (!id || !confirm('Supprimer toutes les ecritures?')) return;
     await api.scan.deleteAllEcritures(id, journal);
     await load(true);
+  };
+
+  const handleVerify = async () => {
+    if (!id) return;
+    setVerifying(true);
+    try {
+      const r = await api.scan.verifyAI(id);
+      setVerifyResult(r);
+    } catch (e: any) {
+      setVerifyResult({ error: e.message });
+    }
+    setVerifying(false);
+  };
+
+  const handleFixTVA = async () => {
+    if (!id) return;
+    setVerifying(true);
+    try {
+      await api.scan.fixTVA(id);
+      await load(true);
+      setVerifyResult(null);
+    } catch (e: any) {
+      alert('Erreur: ' + e.message);
+    }
+    setVerifying(false);
   };
 
   if (loading) return <div className="text-gray-400 py-10">Chargement...</div>;
@@ -453,12 +480,58 @@ export default function ScanDossierPage() {
           <div className="bg-white rounded-lg border p-6 space-y-4">
             <h3 className="font-semibold text-gray-700">Export CSV / Axeane</h3>
             <p className="text-sm text-gray-500">Format: N° piece | Date | Journal | Libelle | Compte | Libelle tresorerie | Debit | Credit</p>
-            <div className="flex gap-3 items-center">
+            <div className="flex gap-3 items-center flex-wrap">
               <button onClick={() => handleExportCSV()} className="bg-emerald-600 text-white px-4 py-2 rounded text-sm hover:bg-emerald-700">
                 <Download size={15} className="inline mr-1" /> Export VT (tous)
               </button>
-              <span className="text-sm text-gray-500">{ecritures.length} ecritures a exporter</span>
+              <button onClick={handleVerify} disabled={verifying || factures.length === 0} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
+                <ShieldCheck size={15} className="inline mr-1" /> {verifying ? 'Verification...' : 'Verifier TVA 19%'}
+              </button>
+              {verifyResult && verifyResult.errors > 0 && (
+                <button onClick={handleFixTVA} disabled={verifying} className="bg-amber-600 text-white px-4 py-2 rounded text-sm hover:bg-amber-700 disabled:opacity-50">
+                  <Wrench size={15} className="inline mr-1" /> Corriger TVA
+                </button>
+              )}
+              <span className="text-sm text-gray-500">{factures.length} factures / {ecritures.length} ecritures</span>
             </div>
+
+            {verifyResult && !verifyResult.error && (
+              <div className={`rounded-lg border p-4 ${verifyResult.verdict === 'OK' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  {verifyResult.verdict === 'OK' ? <CheckCircle size={18} className="text-green-600" /> : <span className="text-red-600 font-bold">!</span>}
+                  <span className={`font-semibold ${verifyResult.verdict === 'OK' ? 'text-green-700' : 'text-red-700'}`}>
+                    {verifyResult.verdict} — {verifyResult.errors} erreur(s) sur {verifyResult.totalFactures} factures
+                  </span>
+                </div>
+                {verifyResult.totals && (
+                  <div className="text-xs text-gray-600 mb-2">
+                    HT: {verifyResult.totals.ht?.toFixed(3)} | TVA: {verifyResult.totals.tva?.toFixed(3)} | FODEC: {verifyResult.totals.fodec?.toFixed(3)} | Timbre: {verifyResult.totals.timbre?.toFixed(3)} | TTC: {verifyResult.totals.ttc?.toFixed(3)}
+                  </div>
+                )}
+                {verifyResult.checks && (
+                  <div className="max-h-64 overflow-auto">
+                    <table className="w-full text-xs">
+                      <thead><tr className="text-gray-500"><th className="text-left pr-2">Piece</th><th className="text-left pr-2">Type</th><th className="text-left pr-2">Client</th><th className="text-left">Check</th></tr></thead>
+                      <tbody>
+                        {verifyResult.checks.map((c: any, i: number) =>
+                          c.checks?.map((ch: any, j: number) => (
+                            <tr key={`${i}-${j}`} className={`border-t ${ch.status === 'error' ? 'bg-red-50' : ''}`}>
+                              {j === 0 && <td rowSpan={c.checks.length} className="pr-2 font-mono">{c.piece}</td>}
+                              {j === 0 && <td rowSpan={c.checks.length} className="pr-2">{c.type}</td>}
+                              {j === 0 && <td rowSpan={c.checks.length} className="pr-2">{c.client}</td>}
+                              <td className={ch.status === 'error' ? 'text-red-600 font-medium' : 'text-green-600'}>{ch.detail}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+            {verifyResult?.error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-600">{verifyResult.error}</div>
+            )}
             {ecritures.length > 0 && (
               <div className="bg-gray-50 rounded p-3 text-xs text-gray-600 max-h-48 overflow-auto">
                 <table className="w-full">
