@@ -139,12 +139,16 @@ export default {
 
       // --- DASHBOARD ---
       if (path === '/api/dashboard' && method === 'GET') {
-        const s = await env.DB.prepare('SELECT COUNT(*) as c FROM societes').first() as any;
-        const d = await env.DB.prepare('SELECT COUNT(*) as c FROM dossiers').first() as any;
-        const e = await env.DB.prepare('SELECT COUNT(*) as c FROM ecritures').first() as any;
         const recent = await env.DB.prepare('SELECT d.*, s.raison_sociale FROM dossiers d LEFT JOIN societes s ON d.societe_id = s.id ORDER BY d.created_at DESC LIMIT 10').all();
         const animal = await env.DB.prepare('SELECT id FROM dossiers WHERE nom = ?').bind('ANIMAL').first() as any;
-        return json({ stats: { societes: s?.c || 0, dossiers: d?.c || 0, ecritures: e?.c || 0 }, recentDossiers: recent.results, animalDossierId: animal?.id || null });
+        // BAUD dossiers
+        const baudSocs = await env.DB.prepare('SELECT * FROM societes_paie ORDER BY nom').all();
+        const baudDossiers: any[] = [];
+        for (const bs of baudSocs.results as any[]) {
+          const ds = await env.DB.prepare('SELECT * FROM dossiers_paie WHERE societe_id = ? ORDER BY created_at DESC').bind(bs.id).all();
+          for (const dd of ds.results as any[]) baudDossiers.push({ ...dd, raison_sociale: bs.nom, type: 'baud' });
+        }
+        return json({ recentDossiers: recent.results, animalDossierId: animal?.id || null, baudDossiers });
       }
 
       // --- SOCIETES ---

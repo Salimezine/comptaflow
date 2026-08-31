@@ -9,13 +9,9 @@ export default function Home() {
 
   const load = async () => {
     try {
-      const [d, bSoc] = await Promise.all([api.dashboard(), api.baud.getSocietes()]);
+      const d = await api.dashboard();
       const animals = (d.recentDossiers || []).map((dd: any) => ({ ...dd, type: 'animal' }));
-      const bauds: any[] = [];
-      for (const s of bSoc) {
-        const ds = await api.baud.getDossiers(s.id);
-        for (const dd of ds) bauds.push({ ...dd, type: 'baud', raison_sociale: s.nom });
-      }
+      const bauds = (d.baudDossiers || []).map((dd: any) => ({ ...dd, type: 'baud' }));
       setDossiers([...animals, ...bauds]);
     } catch {}
     setLoading(false);
@@ -57,7 +53,7 @@ export default function Home() {
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <FolderOpen size={20} className={`text-${color}-500`} />
-                  <span className="font-medium">{isBaud ? String(d.mois).padStart(2, '0') + '/' + d.annee : (d.nom || 'Dossier')}</span>
+                  <span className="font-medium">{d.nom || (d.mois ? String(d.mois).padStart(2, '0') + '/' + d.annee : 'Dossier')}</span>
                 </div>
                 <button onClick={(e) => { e.preventDefault(); deleteDossier(d.id, d.type); }}
                   className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity">
