@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, Table2, Trash2, Download, Zap, Upload, CheckCircle } from 'lucide-react';
 import { api } from '../../lib/api';
-import { extractTextItemsFromPDF } from '../../lib/pdf';
+import { extractTextFromPDF } from '../../lib/pdf';
 
 type Tab = 'factures' | 'ecritures' | 'export';
 
@@ -41,8 +41,7 @@ export default function ScanDossierPage() {
     setUploading(true);
     try {
       for (const file of Array.from(files)) {
-        const items = await extractTextItemsFromPDF(file);
-        const text = items.map((i: any) => i.text).join('\n');
+        const text = await extractTextFromPDF(file);
         const parsed = parseScanInvoice(text);
         if (parsed) {
           await api.scan.addFacture(id, parsed);
