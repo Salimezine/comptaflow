@@ -112,29 +112,36 @@ export default function ScanDossierPage() {
         afterAdressA = false;
       }
 
-      // "Total HT" "279,000" or "Total HT" "-1 560,391"
-      if (line.match(/^Total\s+HT$/i) && i + 1 < lines.length) {
-        totalHT = parseAmount(lines[i + 1].trim());
+      // "Total HT" → skip empty → "279,000" (pdf.js puts empty item between label and value)
+      if (line.match(/^Total\s+HT$/i)) {
+        for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+          const v = parseAmount(lines[j].trim());
+          if (v !== 0) { totalHT = v; break; }
+        }
       }
-
-      // "Total TVA 19%" "53,541"
-      if (line.match(/^Total\s+TVA\s+19\s*%$/i) && i + 1 < lines.length) {
-        tva19 = parseAmount(lines[i + 1].trim());
+      if (line.match(/^Total\s+TVA\s+19\s*%$/i)) {
+        for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+          const v = parseAmount(lines[j].trim());
+          if (v !== 0) { tva19 = v; break; }
+        }
       }
-
-      // "FODEC 1%" "2,790"
-      if (line.match(/^FODEC\s+1\s*%$/i) && i + 1 < lines.length) {
-        fodec = parseAmount(lines[i + 1].trim());
+      if (line.match(/^FODEC\s+1\s*%$/i)) {
+        for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+          const v = parseAmount(lines[j].trim());
+          if (v !== 0) { fodec = v; break; }
+        }
       }
-
-      // "Timbre fiscal" "1,000"
-      if (line.match(/^Timbre\s+fiscal$/i) && i + 1 < lines.length) {
-        timbre = parseAmount(lines[i + 1].trim());
+      if (line.match(/^Timbre\s+fiscal$/i)) {
+        for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+          const v = parseAmount(lines[j].trim());
+          if (v !== 0) { timbre = v; break; }
+        }
       }
-
-      // "Total TTC" "336,331"
-      if (line.match(/^Total\s+TTC$/i) && i + 1 < lines.length) {
-        totalTTC = parseAmount(lines[i + 1].trim());
+      if (line.match(/^Total\s+TTC$/i)) {
+        for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+          const v = parseAmount(lines[j].trim());
+          if (v !== 0) { totalTTC = v; break; }
+        }
       }
     }
 
