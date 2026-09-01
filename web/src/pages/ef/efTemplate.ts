@@ -74,6 +74,14 @@ export async function buildEFExcel(vals: EFValues): Promise<ArrayBuffer> {
   const wsF = wb.getWorksheet('FLUX')!;
   const wsT = wb.getWorksheet('TAB AMT')!;
 
+  // Remove extra sheets (PAGE DE GARDE, BALANCE, TCD, RESULTAT FISCAL)
+  const keepNames = new Set(['ACTIF', 'PASSIF', 'RT', 'SIG ', 'FLUX', 'TAB AMT']);
+  const toRemove: number[] = [];
+  wb.eachSheet((sheet, id) => {
+    if (!keepNames.has(sheet.name)) toRemove.push(id);
+  });
+  toRemove.forEach(id => wb.removeWorksheet(id));
+
   const yearN = vals.anneeN;
   const yearN1 = vals.annexeN1;
 
