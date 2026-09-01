@@ -1532,35 +1532,38 @@ async function handleEFVerify(request: Request, env: Env): Promise<Response> {
     (passif?.provisions || 0) + (passif?.fournisseurs || 0) +
     (passif?.autresPassifsCourants || 0) + (passif?.concoursBancaires || 0);
 
-  const totalProd = (resultat?.revenus || 0) + (resultat?.autresProduitsExploit || 0);
-  const totalCharges = (resultat?.achatsConsommes || 0) + (resultat?.chargesPersonnel || 0) +
-    (resultat?.dotationsAmort || 0) + (resultat?.autresChargesExploit || 0);
+  // Fix sign convention: products (70x) are negative in balance (credit), charges (60x) are positive (debit)
+  // AI expects: products positive, charges positive, result = products - charges
+  const totalProdAbs = Math.abs((resultat?.revenus || 0)) + Math.abs((resultat?.autresProduitsExploit || 0));
+  const totalChargesAbs = Math.abs((resultat?.achatsConsommes || 0)) + Math.abs((resultat?.chargesPersonnel || 0)) +
+    Math.abs((resultat?.dotationsAmort || 0)) + Math.abs((resultat?.autresChargesExploit || 0));
+  const totalProd = totalProdAbs;
+  const totalCharges = totalChargesAbs;
   const resExploit = totalProd - totalCharges;
-  const chargesFinNettes = (resultat?.chargesFinancieres || 0) - (resultat?.produitsPlacements || 0);
-  const resAvantImpot = resExploit - chargesFinNettes + (resultat?.autresGainsOrdinaires || 0) - (resultat?.autresPertesOrdinaires || 0);
-  const resNet = resAvantImpot - (resultat?.impotBenefices || 0) + (resultat?.elementsExtraordinaires || 0);
+  const chargesFinNettes = Math.abs((resultat?.chargesFinancieres || 0)) - Math.abs((resultat?.produitsPlacements || 0));
+  const resAvantImpot = resExploit - chargesFinNettes + Math.abs((resultat?.autresGainsOrdinaires || 0)) - Math.abs((resultat?.autresPertesOrdinaires || 0));
+  const resNet = resAvantImpot - Math.abs((resultat?.impotBenefices || 0)) + (resultat?.elementsExtraordinaires || 0);
 
-  const margeComm = (sig?.ventesMarchandises || 0) - (sig?.cAchatMarchandises || 0);
-  const prodExercice = (sig?.revenus || 0) + (sig?.productionStockee || 0);
-  const margeBrute = margeComm + prodExercice - (sig?.achatsConsommes || 0);
-  const VABrute = margeBrute + (sig?.subventionExploit || 0) + (sig?.autresChargesExternes || 0);
-  const EBE = VABrute - (sig?.impotsTaxes || 0) - (sig?.chargesPersonnel || 0);
+  const margeComm = Math.abs((sig?.ventesMarchandises || 0)) - Math.abs((sig?.cAchatMarchandises || 0));
+  const prodExercice = Math.abs((sig?.revenus || 0)) + Math.abs((sig?.productionStockee || 0));
+  const margeBrute = margeComm + prodExercice - Math.abs((sig?.achatsConsommes || 0));
+  const VABrute = margeBrute + Math.abs((sig?.subventionExploit || 0)) + Math.abs((sig?.autresChargesExternes || 0));
+  const EBE = VABrute - Math.abs((sig?.impotsTaxes || 0)) - Math.abs((sig?.chargesPersonnel || 0));
 
   const prompt = `Expert comptable tunisien PCG. Verifie ces EF de "${nomSociete || '?'}" exercice ${anneeN || 2025}.
 
-BILAN: Actif=${actifTotal}, Passif+CP=${passifTotal}, Ecart=${Math.round(actifTotal - passifTotal)}
-PASSIF_DETAIL: Capital=${passif?.capitalSocial||0}, Reserves=${passif?.reserves||0}, ResultatReportes=${passif?.resultatsReportes||0}, ResultatExercice=${passif?.resultatExercice||0}
-RESULTAT: Prod=${totalProd}, Charges=${totalCharges}, ResExploit=${resExploit}, ChargesFinNettes=${chargesFinNettes}, ResNet=${resNet}
-SIG: VentesMarch=${sig?.ventesMarchandises||0}, AchatsMarch=${sig?.cAchatMarchandises||0}, MargeComm=${margeComm}, MargeBrute=${margeBrute}, VA=${VABrute}, EBE=${EBE}
-IMMO: IncorpVB=${actif?.immoIncorpBrut||0},IncorpAmort=${actif?.immoIncorpAmort||0}, CorpVB=${actif?.immoCorpBrut||0},CorpAmort=${actif?.immoCorpAmort||0}
-FLUX: VarStocks=${flux?.variationStocks||0}, VarCreances=${flux?.variationCreances||0}, VarFrs=${flux?.variationFournisseurs||0}
+BILAN: Actif=${Math.round(actifTotal*1000)/1000}, Passif+CP=${Math.round(passifTotal*1000)/1000}, Ecart=${Math.round((actifTotal - passifTotal)*1000)/1000}
+PASSIF: Capital=${passif?.capitalSocial||0}, Reserves=${passif?.reserves||0}, ResReportes=${passif?.resultatsReportes||0}, ResExercice=${passif?.resultatExercice||0}, Emprunts=${passif?.emprunts||0}, Fournisseurs=${passif?.fournisseurs||0}
+RESULTAT: Produits=${totalProd}, Charges=${totalCharges}, ResExploit=${resExploit}, ChargesFinNettes=${chargesFinNettes}, ResNet=${resNet}
+SIG: VentesMarch=${Math.abs(sig?.ventesMarchandises||0)}, AchatsMarch=${Math.abs(sig?.cAchatMarchandises||0)}, MargeComm=${margeComm}, Revenus=${Math.abs(sig?.revenus||0)}, AchatsConsommes=${Math.abs(sig?.achatsConsommes||0)}, MargeBrute=${margeBrute}, VA=${VABrute}, EBE=${EBE}
 
-Verifie ces regles PCG:
-1) Actif Net = Passif+CP (ecart doit etre 0)
-2) ResultatExercice PASSIF doit correspondre approximativement a ResNet RESULTAT (si balance fermee)
-3) SIG: MargeComm=VentesMarch-AchatsMarch, MargeBrute=MargeComm+Revenus-AchatsConsommes
-4) Non-compensation: charges et produits ne doivent pas etre compenses entre eux
-5) Classification: immo=non-courant, stocks/clients/fournisseurs=courant
+Regles PCG:
+1) Actif = Passif+CP (ecart ≈ 0, tolerance 1 dinar)
+2) ResExercice PASSIF ≈ ResNet RESULTAT (ecart normal si balance non fermee)
+3) MargeComm = VentesMarch - AchatsMarch
+4) MargeBrute = MargeComm + Revenus - AchatsConsommes
+5) Non-compensation: Produits et Charges restent separés, pas de compense
+6) Classification: immo 2x=non-courant, stocks 3x/clients 41/fournisseurs 40=courant
 
 Reponds JSON: {"ok":bool,"errors":[{"field":"x","message":"y","severity":"error|warning"}],"summary":"2-3 lignes","suggestions":["s1"]} UNIQUEMENT JSON.`;
 
