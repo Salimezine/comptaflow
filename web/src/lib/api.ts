@@ -99,6 +99,6 @@ export const api = {
     fixTVA: (did: string) => req<any>(`/scan/dossiers/${did}/fix-tva`, { method: 'POST', body: '{}' }),
   },
   ef: {
-    verify: (data: any) => req<any>('/ef/verify', { method: 'POST', body: JSON.stringify(data) }),
+    verify: (data: any, signal?: AbortSignal) => req<any>('/ef/verify', { method: 'POST', body: JSON.stringify(data), signal }),
   },
 };

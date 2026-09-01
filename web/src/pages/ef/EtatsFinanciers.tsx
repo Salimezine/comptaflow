@@ -484,13 +484,21 @@ export default function EtatsFinanciers() {
   const handleVerifyAI = async () => {
     setAiLoading(true);
     setShowAiPanel(true);
+    setAiResult(null);
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
       const result = await api.ef.verify({
         actif, passif, resultat, sig, flux, immob, nomSociete, anneeN
-      });
+      }, controller.signal);
+      clearTimeout(timeout);
       setAiResult(result);
     } catch (e: any) {
-      setAiResult({ ok: false, summary: 'Erreur: ' + e.message, errors: [], suggestions: [] });
+      if (e.name === 'AbortError') {
+        setAiResult({ ok: false, summary: 'Timeout - l\'IA prend trop de temps. Réessayez.', errors: [], suggestions: [] });
+      } else {
+        setAiResult({ ok: false, summary: 'Erreur: ' + e.message, errors: [], suggestions: [] });
+      }
     } finally {
       setAiLoading(false);
     }
