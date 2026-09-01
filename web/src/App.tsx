@@ -5,11 +5,13 @@ import BaudSocietes from './pages/baud/BaudSocietes';
 import BaudDossierPage from './pages/baud/BaudDossierPage';
 import ScanSocietes from './pages/scanflash/ScanSocietes';
 import ScanDossierPage from './pages/scanflash/ScanDossierPage';
+import EtatsFinanciers from './pages/ef/EtatsFinanciers';
 
 export default function App() {
   const loc = useLocation();
   const isBaud = loc.pathname.startsWith('/baud');
   const isScan = loc.pathname.startsWith('/scanflash');
+  const isEF = loc.pathname.startsWith('/ef');
   const isDossier = loc.pathname.startsWith('/dossier/');
   const isBaudDossier = loc.pathname.startsWith('/baud/dossier/');
   const isScanDossier = loc.pathname.startsWith('/scanflash/dossier/');
@@ -45,6 +47,14 @@ export default function App() {
               </Link>
             </div>
           )}
+
+          {isEF && (
+            <div className="flex gap-1 border-l pl-4">
+              <Link to="/ef" className="px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-50 text-indigo-700">
+                EF
+              </Link>
+            </div>
+          )}
         </div>
       </nav>
       <main className="max-w-7xl mx-auto px-4 py-6">
@@ -55,6 +65,7 @@ export default function App() {
           <Route path="/baud/dossier/:id" element={<BaudDossierPage />} />
           <Route path="/scanflash" element={<ScanSocietes />} />
           <Route path="/scanflash/dossier/:id" element={<ScanDossierPage />} />
+          <Route path="/ef" element={<EtatsFinanciers />} />
         </Routes>
       </main>
     </div>
