@@ -1516,7 +1516,7 @@ function generateFISCecritures(dmi: any, dossierId: string, societeId: string) {
 // ===== EF AI VERIFICATION =====
 async function handleEFVerify(request: Request, env: Env): Promise<Response> {
   const b = await request.json() as any;
-  const { actif, passif, resultat, sig, flux, nomSociete, anneeN } = b;
+  const { actif, passif, resultat, sig, flux, nomSociete, anneeN, balanceN, balanceN1 } = b;
 
   const actifTotal = ((actif?.immoIncorpBrut || 0) - (actif?.immoIncorpAmort || 0)) +
     ((actif?.immoCorpBrut || 0) - (actif?.immoCorpAmort || 0)) +
@@ -1550,19 +1550,32 @@ async function handleEFVerify(request: Request, env: Env): Promise<Response> {
   const VABrute = margeBrute + Math.abs((sig?.subventionExploit || 0)) + Math.abs((sig?.autresChargesExternes || 0));
   const EBE = VABrute - Math.abs((sig?.impotsTaxes || 0)) - Math.abs((sig?.chargesPersonnel || 0));
 
+  // Build balance summary for AI context
+  const buildBalanceSummary = (bal: any[], label: string) => {
+    if (!bal || bal.length === 0) return '';
+    const top = bal.filter((l: any) => Math.abs(l.solde || 0) > 100)
+      .sort((a: any, b: any) => Math.abs(b.solde || 0) - Math.abs(a.solde || 0))
+      .slice(0, 40);
+    return `\nBALANCE ${label} (top comptes):\n${top.map((l: any) => `  ${l.compte} ${l.libelle || ''}: D=${l.debit || 0} C=${l.credit || 0} solde=${l.solde || 0}`).join('\n')}`;
+  };
+
   const prompt = `Expert comptable tunisien PCG. Verifie ces EF de "${nomSociete || '?'}" exercice ${anneeN || 2025}.
 
 BILAN: Actif=${Math.round(actifTotal*1000)/1000}, Passif+CP=${Math.round(passifTotal*1000)/1000}, Ecart=${Math.round((actifTotal - passifTotal)*1000)/1000}
 PASSIF: Capital=${passif?.capitalSocial||0}, Reserves=${passif?.reserves||0}, ResExercice=${passif?.resultatExercice||0}
 RESULTAT: Produits=${totalProd}, Charges=${totalCharges}, ResExploit=${resExploit}, ResNet=${resNet}
 SIG: MargeComm=${margeComm}, MargeBrute=${margeBrute}, VA=${VABrute}, EBE=${EBE}
+${buildBalanceSummary(balanceN, `${anneeN}`)}
+${buildBalanceSummary(balanceN1, `${(anneeN || 2025) - 1}`)}
 
 Verifie UNIQUEMENT ces regles:
 1) Actif ≈ Passif+CP (ecart max 1 dinar)
 2) Non-compensation: pas de compensation charges/produits
 3) Classification: immo 2x=non-courant, stocks 3x/clients 41/fournisseurs 40=courant
+4) Verifie que les totaux des bilans correspondent aux comptes de la balance
+5) Verifie que les produits et charges correspondent aux comptes 70x/60x de la balance
 
-IMPORTANT: Ne verifie PAS les formules de calcul (MargeComm, MargeBrute, etc). Verifie UNIQUEMENT la coherence interne. Si tout est OK, mets errors=[].
+IMPORTANT: Ne verifie PAS les formules de calcul (MargeComm, MargeBrute, etc). Verifie UNIQUEMENT la coherence interne avec la balance. Si tout est OK, mets errors=[].
 Reponds JSON: {"ok":bool,"errors":[],"summary":"2-3 lignes"} UNIQUEMENT JSON.`;
 
   try {

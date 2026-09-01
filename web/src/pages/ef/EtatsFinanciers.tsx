@@ -746,7 +746,7 @@ export default function EtatsFinanciers() {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 60000);
       const result = await api.ef.verify({
-        actif, passif, resultat, sig, flux, immob, nomSociete, anneeN
+        actif, passif, resultat, sig, flux, immob, nomSociete, anneeN, balanceN, balanceN1
       }, controller.signal);
       clearTimeout(timeout);
       setAiResult(result);
