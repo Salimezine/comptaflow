@@ -8,59 +8,55 @@ type BalanceLigne = { compte: string; libelle: string; debit: number; credit: nu
 function parseBalanceCSV(text: string): BalanceLigne[] {
   const lines = text.trim().split('\n').filter(l => l.trim());
   const result: BalanceLigne[] = [];
-  for (const line of lines) {
+  const parseNum = (s: string) => {
+    if (!s || s === '' || s === '-') return 0;
+    return parseFloat(s.replace(/["\s]/g, '').replace(',', '.')) || 0;
+  };
+
+  // Detect header for column layout
+  let debitIdx = -1, creditIdx = -1, soldeIdx = -1, compteIdx = 0, libIdx = 1;
+  if (lines.length > 0) {
+    const headerParts = lines[0].split(/[;,]/).map(s => s.trim().toUpperCase().replace(/\s/g, ''));
+    for (let i = 0; i < headerParts.length; i++) {
+      const h = headerParts[i];
+      if (h.includes('N°COMPTE') || h.includes('NOCOMPTE') || h === 'COMPTE' || h === 'NCOMPTE' || h === 'NUMERO') compteIdx = i;
+      else if (h.includes('LIBELL') || h.includes('LIBILLE') || h === 'LIBELLE') libIdx = i;
+      else if (h === 'DEBIT') debitIdx = i;
+      else if (h === 'CREDIT') creditIdx = i;
+      else if (h === 'SLD' || h === 'SOLDE') soldeIdx = i;
+    }
+  }
+  const hasFixedCols = debitIdx !== -1 || creditIdx !== -1 || soldeIdx !== -1;
+
+  for (let ri = hasFixedCols ? 1 : 0; ri < lines.length; ri++) {
+    const line = lines[ri];
     const parts = line.split(/[;,]/).map(s => s.trim());
     if (parts.length < 2) continue;
-
-    // Find account number: first part with >= 4 digits
-    let compteIdx = -1;
+    let acctIdx = -1;
     for (let i = 0; i < Math.min(parts.length, 4); i++) {
       const cleaned = parts[i].replace(/\D/g, '');
-      if (cleaned.length >= 4 && !isNaN(parseInt(cleaned))) {
-        compteIdx = i;
-        break;
-      }
+      if (cleaned.length >= 4 && !isNaN(parseInt(cleaned))) { acctIdx = i; break; }
     }
-    if (compteIdx === -1) continue;
-
-    const compte = parts[compteIdx].replace(/\D/g, '');
-    const libelle = compteIdx + 1 < parts.length ? parts[compteIdx + 1].replace(/"/g, '').trim() : '';
-
-    // Find numeric columns after compte+libelle
-    const numCols: number[] = [];
-    for (let i = compteIdx + 2; i < parts.length; i++) {
-      const cleaned = parts[i].replace(/["\s]/g, '').replace(',', '.');
-      if (cleaned !== '' && cleaned !== '-') {
-        numCols.push(i);
-      }
-    }
-
-    const parseNum = (s: string) => {
-      if (!s || s === '' || s === '-') return 0;
-      return parseFloat(s.replace(/["\s]/g, '').replace(',', '.')) || 0;
-    };
+    if (acctIdx === -1) continue;
+    const raw = parts[acctIdx].replace(/\D/g, '');
+    const compte = raw.length > 6 ? raw.slice(0, 6) : raw;
+    const lib = acctIdx + 1 < parts.length ? parts[acctIdx + 1].replace(/"/g, '').trim() : '';
 
     let debit = 0, credit = 0, solde = 0;
-
-    if (numCols.length >= 3) {
-      // Format: Compte, Libelle, Debit, Credit, Solde
-      debit = parseNum(parts[numCols[0]]);
-      credit = parseNum(parts[numCols[1]]);
-      solde = parseNum(parts[numCols[2]]);
-    } else if (numCols.length === 2) {
-      // Format: Compte, Libelle, Debit, Credit (no Solde) or Compte, Libelle, Solde, ...
-      const v1 = parseNum(parts[numCols[0]]);
-      const v2 = parseNum(parts[numCols[1]]);
-      // If debit > 0 and credit > 0, treat as Debit/Credit
-      // Otherwise treat as Debit/Credit based on sign or just first two
-      debit = v1;
-      credit = v2;
-      solde = v1 - v2;
-    } else if (numCols.length === 1) {
-      solde = parseNum(parts[numCols[0]]);
+    if (hasFixedCols) {
+      debit = debitIdx !== -1 ? parseNum(parts[debitIdx]) : 0;
+      credit = creditIdx !== -1 ? parseNum(parts[creditIdx]) : 0;
+      solde = soldeIdx !== -1 ? parseNum(parts[soldeIdx]) : (debit - credit);
+    } else {
+      const numVals: number[] = [];
+      for (let i = acctIdx + 2; i < parts.length; i++) {
+        if (parts[i] !== '' && parts[i] !== null) numVals.push(parseNum(parts[i]));
+      }
+      if (numVals.length >= 3) { debit = numVals[0]; credit = numVals[1]; solde = numVals[2]; }
+      else if (numVals.length === 2) { debit = numVals[0]; credit = numVals[1]; solde = numVals[0] - numVals[1]; }
+      else if (numVals.length === 1) { solde = numVals[0]; }
     }
-
-    result.push({ compte, libelle, debit, credit, solde });
+    result.push({ compte, libelle: lib, debit, credit, solde });
   }
   return result;
 }
@@ -72,51 +68,57 @@ async function parseBalanceXLSX(data: ArrayBuffer): Promise<BalanceLigne[]> {
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
   const result: BalanceLigne[] = [];
-  for (const row of rows) {
-    if (!row || row.length < 2) continue;
+  const parseNum = (v: any) => {
+    if (v === null || v === undefined || v === '' || v === '-') return 0;
+    if (typeof v === 'number') return v;
+    return parseFloat(String(v).replace(/\s/g, '').replace(',', '.')) || 0;
+  };
 
-    // Find account number: first cell with >= 4 digits
-    let compteIdx = -1;
+  // Detect column layout from header
+  let debitIdx = -1, creditIdx = -1, soldeIdx = -1, compteIdx = 0, libIdx = 1;
+  const header = rows[0] || [];
+  for (let i = 0; i < header.length; i++) {
+    const h = String(header[i] || '').toUpperCase().replace(/\s/g, '');
+    if (h.includes('N°COMPTE') || h.includes('NOCOMPTE') || h === 'COMPTE') compteIdx = i;
+    else if (h.includes('LIBELL') || h.includes('LIBILLE') || h === 'LIBELLE') libIdx = i;
+    else if (h === 'DEBIT' || h === 'DEBITSSOLD') debitIdx = i;
+    else if (h === 'CREDIT' || h === 'CREDITSSOLD') creditIdx = i;
+    else if (h === 'SLD' || h === 'SOLDE' || h === 'SOLDES' || h === 'SLDSOLD') soldeIdx = i;
+  }
+
+  // Check if we detected a header with D/C/S columns
+  const hasFixedCols = debitIdx !== -1 || creditIdx !== -1 || soldeIdx !== -1;
+
+  for (let ri = hasFixedCols ? 1 : 0; ri < rows.length; ri++) {
+    const row = rows[ri];
+    if (!row || row.length < 2) continue;
+    let acctIdx = -1;
     for (let i = 0; i < Math.min(row.length, 4); i++) {
       const cleaned = String(row[i] || '').replace(/\D/g, '');
-      if (cleaned.length >= 4 && !isNaN(parseInt(cleaned))) {
-        compteIdx = i;
-        break;
-      }
+      if (cleaned.length >= 4 && !isNaN(parseInt(cleaned))) { acctIdx = i; break; }
     }
-    if (compteIdx === -1) continue;
-
-    const compte = String(row[compteIdx]).replace(/\D/g, '');
-    const libelle = compteIdx + 1 < row.length ? String(row[compteIdx + 1] || '').trim() : '';
-
-    const parseNum = (v: any) => {
-      if (v === null || v === undefined || v === '' || v === '-') return 0;
-      if (typeof v === 'number') return v;
-      return parseFloat(String(v).replace(/\s/g, '').replace(',', '.')) || 0;
-    };
-
-    // Find numeric columns after compte+libelle
-    const numVals: number[] = [];
-    for (let i = compteIdx + 2; i < row.length; i++) {
-      const v = parseNum(row[i]);
-      if (v !== 0) numVals.push(v);
-    }
+    if (acctIdx === -1) continue;
+    const raw = String(row[acctIdx]).replace(/\D/g, '');
+    const compte = raw.length > 6 ? raw.slice(0, 6) : raw;
+    const lib = acctIdx + 1 < row.length ? String(row[acctIdx + 1] || '').trim() : '';
 
     let debit = 0, credit = 0, solde = 0;
-
-    if (numVals.length >= 3) {
-      debit = numVals[0];
-      credit = numVals[1];
-      solde = numVals[2];
-    } else if (numVals.length === 2) {
-      debit = numVals[0];
-      credit = numVals[1];
-      solde = numVals[0] - numVals[1];
-    } else if (numVals.length === 1) {
-      solde = numVals[0];
+    if (hasFixedCols) {
+      debit = debitIdx !== -1 ? parseNum(row[debitIdx]) : 0;
+      credit = creditIdx !== -1 ? parseNum(row[creditIdx]) : 0;
+      solde = soldeIdx !== -1 ? parseNum(row[soldeIdx]) : (debit - credit);
+    } else {
+      // No header: detect by position
+      const numVals: number[] = [];
+      for (let i = acctIdx + 2; i < row.length; i++) {
+        if (row[i] === null || row[i] === undefined || row[i] === '') continue;
+        numVals.push(parseNum(row[i]));
+      }
+      if (numVals.length >= 3) { debit = numVals[0]; credit = numVals[1]; solde = numVals[2]; }
+      else if (numVals.length === 2) { debit = numVals[0]; credit = numVals[1]; solde = numVals[0] - numVals[1]; }
+      else if (numVals.length === 1) { solde = numVals[0]; }
     }
-
-    result.push({ compte, libelle, debit, credit, solde });
+    result.push({ compte, libelle: lib, debit, credit, solde });
   }
   return result;
 }
