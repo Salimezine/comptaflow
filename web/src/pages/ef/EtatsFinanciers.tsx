@@ -151,7 +151,7 @@ function sumCredit(lignes: BalanceLigne[], prefixes: string[]): number {
     .reduce((s, l) => s + (l.solde < 0 ? Math.abs(l.solde) : 0), 0);
 }
 
-type EFType = 'actif' | 'passif' | 'resultat' | 'tab-amt' | 'flux' | 'sig';
+type EFType = 'actif' | 'passif' | 'resultat' | 'tab-amt' | 'flux' | 'sig' | 'fisc';
 
 const EF_TYPES: { key: EFType; label: string; icon: string; desc: string }[] = [
   { key: 'resultat', label: 'Etat des soldes de gestion', icon: '📊', desc: 'Produits et charges - Resultat net' },
@@ -160,6 +160,7 @@ const EF_TYPES: { key: EFType; label: string; icon: string; desc: string }[] = [
   { key: 'tab-amt', label: 'Tableau des Immobilisations', icon: '🏗️', desc: 'VB, acquisitions, cessions, amortissements' },
   { key: 'flux', label: 'Tableau des Flux de Tresorerie', icon: '💧', desc: 'Flux exploitation, investissement, financement' },
   { key: 'sig', label: 'Soldes Intermediaires de Gestion', icon: '📈', desc: 'Marge, EBE, resultat' },
+  { key: 'fisc', label: 'Resultat Fiscal', icon: '🏛️', desc: 'Determination du resultat fiscal et IS' },
 ];
 
 function fmt(n: number): string {
@@ -683,6 +684,28 @@ export default function EtatsFinanciers() {
   const resultatAvantImpotSIG = resultatExploitSIG;
   const resultatNetSIG = resultatAvantImpotSIG - sig.impotBenefices;
 
+  // ===== FISC (Resultat Fiscal) =====
+  const [fisc, setFisc] = useState({
+    resultatComptable: 0,
+    reintegrations: {
+      impotsResultat: 0, css: 0, timbresVoyage: 0, penalitesRetard: 0,
+      provisionsRetraite: 0, chargesNonDeductibles: 0, pertesExceptionnelles: 0,
+      facturesNonConformes: 0, provisionsConges: 0, repriseGainChange: 0,
+      pertesChangeReeval: 0,
+    },
+    deductions: { reprisePerteChange: 0, gainChangeReeval: 0 },
+    resultatFiscal: 0, resultatImposable: 0,
+    impotSocietes: 0, acompteProvisionnel: 0, reportImpot2024: 0,
+    retenueSourceClients: 0, reportIS: 0, css2025: 0,
+    reportCSS2024: 0, reportCSS2025: 0,
+  });
+  const updateFisc = (k: string, v: number) => setFisc(prev => ({ ...prev, [k]: v }));
+  const updateFiscReintegrations = (k: string, v: number) => setFisc(prev => ({ ...prev, reintegrations: { ...prev.reintegrations, [k]: v } }));
+  const updateFiscDeductions = (k: string, v: number) => setFisc(prev => ({ ...prev, deductions: { ...prev.deductions, [k]: v } }));
+  const totalReintegrations = Object.values(fisc.reintegrations).reduce((s, v) => s + v, 0);
+  const totalDeductions = Object.values(fisc.deductions).reduce((s, v) => s + v, 0);
+  const resultatFiscalCalc = fisc.resultatComptable + totalReintegrations - totalDeductions;
+
   const annexeN1 = anneeN - 1;
 
   // ===== AI VERIFICATION =====
@@ -748,6 +771,7 @@ export default function EtatsFinanciers() {
     addSheet('SIG', buildSigRows());
     addSheet('TAB_AMT', buildTabAmtRows());
     addSheet('FLUX', buildFluxRows());
+    addSheet('RESULTAT_FISCAL', buildFiscRows());
     const b64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
     const binary = atob(b64);
     const bytes = new Uint8Array(binary.length);
@@ -1375,6 +1399,147 @@ export default function EtatsFinanciers() {
     );
   };
 
+  // ===== FISC RENDER =====
+  const buildFiscRows = (): any[][] => {
+    const r = fisc.reintegrations;
+    const d = fisc.deductions;
+    return [
+      ['TABLEAU DE DETERMINATION DU RESULTAT FISCAL ' + anneeN],
+      [],
+      ['Resultat comptable', '', '', '', '', fisc.resultatComptable],
+      [],
+      ['Reintegrations:', '', '', '', '', totalReintegrations],
+      ['', 'Impots sur le resultat', '', '', '', r.impotsResultat],
+      ['', 'CSS', '', '', '', r.css],
+      ['', 'Timbres de voyage', '', '', '', r.timbresVoyage],
+      ['', 'Penalites de retard', '', '', '', r.penalitesRetard],
+      ['', 'Dotations provisions retraite', '', '', '', r.provisionsRetraite],
+      ['', 'Charges non deductibles', '', '', '', r.chargesNonDeductibles],
+      ['', 'Pertes exceptionnelles', '', '', '', r.pertesExceptionnelles],
+      ['', 'Factures non conformes', '', '', '', r.facturesNonConformes],
+      ['', 'Dotations provisions conges', '', '', '', r.provisionsConges],
+      ['', 'Reprise gain de change reeval', '', '', '', r.repriseGainChange],
+      ['', 'Pertes de change reeval', '', '', '', r.pertesChangeReeval],
+      [],
+      ['Deductions:', '', '', '', '', totalDeductions],
+      ['', 'Reprise perte de change reeval', '', '', '', d.reprisePerteChange],
+      ['', 'Gain de change reeval', '', '', '', d.gainChangeReeval],
+      [],
+      ['RESULTAT FISCAL', '', '', '', '', resultatFiscalCalc],
+      ['Resultat imposable', '', '', '', '', resultatFiscalCalc],
+      [],
+      ['Impot sur les societes ' + anneeN, '', '', '', '', fisc.impotSocietes],
+      ['Acompte provisionnel', '', '', '', '', fisc.acompteProvisionnel],
+      ['Report impot ' + (anneeN - 1), '', '', '', '', fisc.reportImpot2024],
+      ['Retenue a la source / clients', '', '', '', '', fisc.retenueSourceClients],
+      ['Reports IS', '', '', '', '', fisc.reportIS],
+      ['CSS ' + anneeN, '', '', '', '', fisc.css2025],
+      ['Report CSS ' + (anneeN - 1), '', '', '', '', fisc.reportCSS2024],
+      ['Report CSS ' + anneeN, '', '', '', '', fisc.reportCSS2025],
+    ];
+  };
+  const renderFisc = () => {
+    const r = fisc.reintegrations;
+    const d = fisc.deductions;
+    const headers = ['Libelle', '', '', '', '', `N (${anneeN})`];
+    const rows = [
+      { label: 'Resultat comptable', vals: [fisc.resultatComptable] },
+      { label: 'REINTEGRATIONS', isSection: true, vals: [totalReintegrations] },
+      { label: 'Impots sur le resultat', indent: 1, vals: [r.impotsResultat] },
+      { label: 'CSS', indent: 1, vals: [r.css] },
+      { label: 'Timbres de voyage', indent: 1, vals: [r.timbresVoyage] },
+      { label: 'Penalites de retard', indent: 1, vals: [r.penalitesRetard] },
+      { label: 'Dotations provisions retraite', indent: 1, vals: [r.provisionsRetraite] },
+      { label: 'Charges non deductibles', indent: 1, vals: [r.chargesNonDeductibles] },
+      { label: 'Pertes exceptionnelles', indent: 1, vals: [r.pertesExceptionnelles] },
+      { label: 'Factures non conformes', indent: 1, vals: [r.facturesNonConformes] },
+      { label: 'Dotations provisions conges', indent: 1, vals: [r.provisionsConges] },
+      { label: 'Reprise gain de change reeval', indent: 1, vals: [r.repriseGainChange] },
+      { label: 'Pertes de change reeval', indent: 1, vals: [r.pertesChangeReeval] },
+      { label: 'DEDUCTIONS', isSection: true, vals: [totalDeductions] },
+      { label: 'Reprise perte de change reeval', indent: 1, vals: [d.reprisePerteChange] },
+      { label: 'Gain de change reeval', indent: 1, vals: [d.gainChangeReeval] },
+      { label: 'RESULTAT FISCAL', bold: true, vals: [resultatFiscalCalc] },
+      { label: 'Resultat imposable', bold: true, vals: [resultatFiscalCalc] },
+      { label: 'IS ' + anneeN, isSection: true, vals: [fisc.impotSocietes] },
+      { label: 'Acompte provisionnel', indent: 1, vals: [fisc.acompteProvisionnel] },
+      { label: 'Report impot ' + (anneeN - 1), indent: 1, vals: [fisc.reportImpot2024] },
+      { label: 'Retenue source / clients', indent: 1, vals: [fisc.retenueSourceClients] },
+      { label: 'Reports IS', indent: 1, vals: [fisc.reportIS] },
+      { label: 'CSS ' + anneeN, indent: 1, vals: [fisc.css2025] },
+      { label: 'Report CSS ' + (anneeN - 1), indent: 1, vals: [fisc.reportCSS2024] },
+      { label: 'Report CSS ' + anneeN, indent: 1, vals: [fisc.reportCSS2025] },
+    ];
+    return (
+      <div className="space-y-4">
+        {renderToolbar("Resultat Fiscal", buildFiscRows, 'RESULTAT_FISCAL')}
+        <div className="bg-white border rounded-lg p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Resultat comptable</label>
+              <input type="number" step="0.001" value={fisc.resultatComptable}
+                onChange={e => updateFisc('resultatComptable', parseFloat(e.target.value) || 0)}
+                className="w-full border rounded px-2 py-1 text-sm" />
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-gray-600 mb-2">Reintegrations</div>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                ['impotsResultat', 'Impots resultat'], ['css', 'CSS'], ['timbresVoyage', 'Timbres voyage'],
+                ['penalitesRetard', 'Penalites retard'], ['provisionsRetraite', 'Provisions retraite'],
+                ['chargesNonDeductibles', 'Charges non deductibles'], ['pertesExceptionnelles', 'Pertes exceptionnelles'],
+                ['facturesNonConformes', 'Factures non conformes'], ['provisionsConges', 'Provisions conges'],
+                ['repriseGainChange', 'Reprise gain change'], ['pertesChangeReeval', 'Pertes change reeval'],
+              ].map(([k, label]) => (
+                <div key={k}>
+                  <label className="block text-xs text-gray-500">{label}</label>
+                  <input type="number" step="0.001" value={(r as any)[k]}
+                    onChange={e => updateFiscReintegrations(k, parseFloat(e.target.value) || 0)}
+                    className="w-full border rounded px-2 py-1 text-sm" />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-gray-600 mb-2">Deductions</div>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                ['reprisePerteChange', 'Reprise perte change'], ['gainChangeReeval', 'Gain change reeval'],
+              ].map(([k, label]) => (
+                <div key={k}>
+                  <label className="block text-xs text-gray-500">{label}</label>
+                  <input type="number" step="0.001" value={(d as any)[k]}
+                    onChange={e => updateFiscDeductions(k, parseFloat(e.target.value) || 0)}
+                    className="w-full border rounded px-2 py-1 text-sm" />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="border-t pt-3">
+            <div className="text-xs font-semibold text-gray-600 mb-2">Impot sur les societes</div>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                ['impotSocietes', 'IS ' + anneeN], ['acompteProvisionnel', 'Acompte provisionnel'],
+                ['reportImpot2024', 'Report impot ' + (anneeN - 1)], ['retenueSourceClients', 'Retenue source clients'],
+                ['reportIS', 'Reports IS'], ['css2025', 'CSS ' + anneeN],
+                ['reportCSS2024', 'Report CSS ' + (anneeN - 1)], ['reportCSS2025', 'Report CSS ' + anneeN],
+              ].map(([k, label]) => (
+                <div key={k}>
+                  <label className="block text-xs text-gray-500">{label}</label>
+                  <input type="number" step="0.001" value={(fisc as any)[k]}
+                    onChange={e => updateFisc(k, parseFloat(e.target.value) || 0)}
+                    className="w-full border rounded px-2 py-1 text-sm" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        {renderTable(headers.filter((_, i) => i > 0), rows)}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -1493,6 +1658,7 @@ export default function EtatsFinanciers() {
           {selected === 'tab-amt' && renderTabAmt()}
           {selected === 'flux' && renderFlux()}
           {selected === 'sig' && renderSIG()}
+          {selected === 'fisc' && renderFisc()}
         </div>
       )}
     </div>
