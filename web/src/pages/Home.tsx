@@ -70,10 +70,12 @@ export default function Home() {
                   <FolderOpen size={20} className={`text-${color}-500`} />
                   <span className="font-medium">{isBaud ? 'BAUD' : isScan ? 'SCANFLASH' : (d.nom || 'Dossier')}</span>
                 </div>
+                {!isScan && (
                 <button onClick={(e) => { e.preventDefault(); deleteDossier(d.id, d.type); }}
                   className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity">
                   <Trash2 size={14} />
                 </button>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <span className={`px-2 py-0.5 rounded text-xs bg-${color}-100 text-${color}-700`}>{label}</span>

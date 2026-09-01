@@ -53,506 +53,363 @@ export interface EFValues {
   immob: { cat: string; vbN: number; acq: number; ces: number; dot: number; reg: number; vbN1: number; amortN1: number }[];
 }
 
-const headerFont = { name: 'Calibri', bold: true, size: 12, color: { argb: 'FF000000' } };
-const titleFont = { name: 'Calibri', bold: true, size: 18, color: { argb: 'FF000000' } };
-const subtitleFont = { name: 'Calibri', bold: true, size: 14, color: { argb: 'FF000000' } };
-const labelFont = { name: 'Calibri', size: 11 };
-const labelBoldFont = { name: 'Calibri', bold: true, size: 11 };
-const dateHeaderFont = { name: 'Calibri', bold: true, size: 11 };
-const thinBorder: Partial<ExcelJS.Border> = { style: 'thin' };
-const topBorder: Partial<ExcelJS.Border> = { style: 'medium', color: { argb: 'FF1F4E79' } };
-const bottomDoubleBorder: Partial<ExcelJS.Border> = { style: 'double', color: { argb: 'FF1F4E79' } };
-const numFmt = '#,##0';
+// Cell reference for the template EF-31-12-2025.xlsx
+// ACTIF: cols G=6, I=8, K=10, M=12 (0-indexed)
+// PASSIF: cols F=5, G=6, H=7, J=9, K=10
+// RESULTAT: cols G=6, J=9, L=11
+// SIG: cols F=5, G=6, J=9
+// FLUX MA: cols G=6, H=7, K=10
+// TAB AMT: cols D=3, G=6, I=8, J=9, L=11, M=12
 
-function setMerge(ws: ExcelJS.Worksheet, range: string) {
-  ws.mergeCells(range);
+function w(ws: ExcelJS.Worksheet, r: number, c: number, val: number) {
+  ws.getRow(r + 1).getCell(c + 1).value = val;
 }
 
-function setCell(ws: ExcelJS.Worksheet, addr: string, val: any, font?: any, fmt?: string, alignment?: any, fill?: any, border?: any) {
-  const cell = ws.getCell(addr);
-  cell.value = val;
-  const f = font ? { ...font } : undefined;
-  if (f) delete (f as any).alignment;
-  if (f) cell.font = f;
-  if (font?.alignment) cell.alignment = font.alignment;
-  if (alignment) cell.alignment = alignment;
-  if (fmt) cell.numFmt = fmt;
-  if (fill) cell.fill = fill;
-  if (border) cell.border = border;
-  return cell;
+function wStr(ws: ExcelJS.Worksheet, r: number, c: number, val: string) {
+  ws.getRow(r + 1).getCell(c + 1).value = val;
 }
 
 export async function buildEFExcel(vals: EFValues): Promise<ArrayBuffer> {
+  const resp = await fetch('/ef-template.xlsx');
+  const buf = await resp.arrayBuffer();
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'EUREX';
-  wb.created = new Date();
+  await wb.xlsx.load(buf);
 
-  // ============ ACTIF ============
-  const wsA = wb.addWorksheet('ACTIF', { properties: { defaultColWidth: 12 } });
-  wsA.columns = [
-    { width: 5 }, { width: 3 }, { width: 40 }, { width: 8 },
-    { width: 8 }, { width: 8 }, { width: 15 },
-    { width: 8 }, { width: 8 }, { width: 15 }, { width: 14 }, { width: 14 }
-  ];
+  const wsA = wb.getWorksheet('ACTIF')!;
+  const wsP = wb.getWorksheet('PASSIF')!;
+  const wsR = wb.getWorksheet('RESULTAT')!;
+  const wsS = wb.getWorksheet('SIG')!;
+  const wsF = wb.getWorksheet('FLUX MA')!;
+  const wsT = wb.getWorksheet('TAB AMT')!;
 
-  // Title row 2 merged C2:K2
-  setMerge(wsA, 'C2:K2');
-  for (let c = 3; c <= 11; c++) setCell(wsA, `${String.fromCharCode(64+c)}2`, vals.nomSociete, { ...titleFont });
-  setCell(wsA, 'C2', vals.nomSociete, titleFont, undefined, { horizontal: 'center' });
+  // ===== Update headers with societe name & years =====
+  // Row 0 (Excel row 1): societe name in A1 for each sheet
+  wStr(wsA, 0, 0, vals.nomSociete);
+  wStr(wsP, 0, 0, vals.nomSociete);
+  wStr(wsR, 0, 0, vals.nomSociete);
+  wStr(wsS, 0, 0, vals.nomSociete);
+  wStr(wsF, 0, 0, vals.nomSociete);
+  wStr(wsT, 0, 0, vals.nomSociete);
 
-  // Subtitle row 4 merged C4:K4
-  setMerge(wsA, 'C4:K4');
-  setCell(wsA, 'C4', `BILANS COMPARES ARRETES AUX 31 Dec ${vals.anneeN} & 31 Dec ${vals.annexeN1}`, { ...subtitleFont, alignment: { horizontal: 'center' } });
+  // Year headers
+  const yearN = vals.anneeN;
+  const yearN1 = vals.annexeN1;
 
-  // Currency row 6 merged C6:K6
-  setMerge(wsA, 'C6:K6');
-  setCell(wsA, 'C6', '(En dinars tunisiens)', { ...subtitleFont, alignment: { horizontal: 'center' } });
+  // ACTIF: G5=anneeN, K5=anneeN1 (0-indexed: row4, col6/col10)
+  w(wsA, 4, 6, yearN); w(wsA, 4, 10, yearN1);
+  // PASSIF: F5=anneeN, K5=anneeN1 (row4, col5/col10)
+  w(wsP, 4, 5, yearN); w(wsP, 4, 10, yearN1);
+  // RESULTAT: G5=anneeN, J5=anneeN1 (row4, col6/col9)
+  w(wsR, 4, 6, yearN); w(wsR, 4, 9, yearN1);
+  // SIG: F6=anneeN, J6=anneeN1 (row5, col5/col9)
+  w(wsS, 5, 5, yearN); w(wsS, 5, 9, yearN1);
+  // FLUX: G6=anneeN, H6=anneeN1 (row5, col6/col7)
+  w(wsF, 5, 6, yearN); w(wsF, 5, 7, yearN1);
+  // TAB AMT: D6=anneeN1, I6=anneeN1 (row5, col3/col8)
+  w(wsT, 5, 3, yearN1); w(wsT, 5, 8, yearN1);
 
-  // Header row 9
-  setCell(wsA, 'E9', 'ACTIFS', labelBoldFont);
-  setCell(wsA, 'F9', 'Notes', { ...labelBoldFont, alignment: { horizontal: 'center' } });
-  setCell(wsA, 'I9', new Date(vals.anneeN, 11, 31), { ...dateHeaderFont, alignment: { horizontal: 'right' } }, 'dd/mm/yyyy');
-  setCell(wsA, 'L9', new Date(vals.annexeN1, 11, 31), { ...dateHeaderFont, alignment: { horizontal: 'right' } }, 'dd/mm/yyyy');
+  // ===== ACTIF =====
+  // Immobilisations incorporelles: I11=brut N (row10, col8)
+  w(wsA, 10, 8, vals.immoIncorpBrutN);
+  // Amort incorp: G13=N, K13=N1 (row12, col6/col10)
+  w(wsA, 12, 6, vals.immoIncorpAmortN);
+  w(wsA, 12, 10, vals.immoIncorpAmortN1);
 
-  // ACTIFS NON COURANTS
-  setCell(wsA, 'C11', 'ACTIFS NON COURANTS', labelBoldFont);
+  // Immobilisations corporelles: no brut row in reference (directly in G17/K17 for amort)
+  // G17=amort corp N, K17=N1 (row16, col6/col10)
+  w(wsA, 16, 6, vals.immoCorpAmortN);
+  w(wsA, 16, 10, vals.immoCorpAmortN1);
 
-  // Actifs immobilisés
-  setCell(wsA, 'D13', 'Actifs immobilis\u00e9s', labelBoldFont);
+  // Immobilisations financieres: I19=brut N (row18, col8)
+  w(wsA, 18, 8, vals.immoFinancBrutN);
+  // Provisions financ: G21=N, K21=N1 (row20, col6/col10)
+  w(wsA, 20, 6, vals.immoFinancProvN);
+  w(wsA, 20, 10, vals.immoFinancProvN1);
 
-  // A1 - Immobilisations incorporelles
-  setCell(wsA, 'A15', 'A1', labelFont);
-  setCell(wsA, 'E15', 'Immobilisations incorporelles', labelFont);
-  setCell(wsA, 'I15', vals.immoIncorpBrutN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L15', vals.immoIncorpBrutN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'M15', vals.immoIncorpBrutN - vals.immoIncorpBrutN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Total immo: G23=N, K23=N1
+  const totalImmoN = (vals.immoIncorpBrutN - vals.immoIncorpAmortN)
+    + (vals.immoCorpBrutN - vals.immoCorpAmortN)
+    + (vals.immoFinancBrutN - vals.immoFinancProvN);
+  const totalImmoN1 = (vals.immoIncorpBrutN1 - vals.immoIncorpAmortN1)
+    + (vals.immoCorpBrutN1 - vals.immoCorpAmortN1)
+    + (vals.immoFinancBrutN1 - vals.immoFinancProvN1);
+  w(wsA, 22, 6, totalImmoN);
+  w(wsA, 22, 10, totalImmoN1);
 
-  // A2 - Amortissements
-  setCell(wsA, 'A16', 'A2', labelFont);
-  setCell(wsA, 'E16', 'Moins : amortissements', labelFont);
-  setCell(wsA, 'I16', -vals.immoIncorpAmortN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L16', -vals.immoIncorpAmortN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // Net
-  setCell(wsA, 'I17', vals.immoIncorpBrutN - vals.immoIncorpAmortN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L17', vals.immoIncorpBrutN1 - vals.immoIncorpAmortN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // A3 - Immobilisations corporelles
-  setCell(wsA, 'A19', 'A3', labelFont);
-  setCell(wsA, 'E19', 'Immobilisations corporelles', labelFont);
-  setCell(wsA, 'I19', vals.immoCorpBrutN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L19', vals.immoCorpBrutN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'M19', vals.immoCorpBrutN - vals.immoCorpBrutN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // A4 - Amortissements corporelles
-  setCell(wsA, 'A20', 'A4', labelFont);
-  setCell(wsA, 'E20', 'Moins : amortissements', labelFont);
-  setCell(wsA, 'I20', -vals.immoCorpAmortN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L20', -vals.immoCorpAmortN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'M20', vals.immoCorpAmortN - vals.immoCorpAmortN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // Net corp
-  setCell(wsA, 'I21', vals.immoCorpBrutN - vals.immoCorpAmortN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L21', vals.immoCorpBrutN1 - vals.immoCorpAmortN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'M21', (vals.immoCorpBrutN - vals.immoCorpAmortN) - (vals.immoCorpBrutN1 - vals.immoCorpAmortN1), { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // Immobilisations encours
-  setCell(wsA, 'E23', 'Immobilisations encours', labelFont);
-  setCell(wsA, 'I23', 0, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L23', 0, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // A5 - Immobilisations financieres
-  setCell(wsA, 'A25', 'A5', labelFont);
-  setCell(wsA, 'E25', 'Immobilisations financi\u00e8res', labelFont);
-  setCell(wsA, 'I25', vals.immoFinancBrutN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L25', vals.immoFinancBrutN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // A6 - Provisions
-  setCell(wsA, 'A26', 'A6', labelFont);
-  setCell(wsA, 'E26', 'Moins : provisions', labelFont);
-  setCell(wsA, 'I26', -vals.immoFinancProvN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L26', -vals.immoFinancProvN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // Net financ
-  setCell(wsA, 'I27', vals.immoFinancBrutN - vals.immoFinancProvN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L27', vals.immoFinancBrutN1 - vals.immoFinancProvN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // Total actifs immobilisés
-  const totalImmoN = (vals.immoIncorpBrutN - vals.immoIncorpAmortN) + (vals.immoCorpBrutN - vals.immoCorpAmortN) + (vals.immoFinancBrutN - vals.immoFinancProvN);
-  const totalImmoN1 = (vals.immoIncorpBrutN1 - vals.immoIncorpAmortN1) + (vals.immoCorpBrutN1 - vals.immoCorpAmortN1) + (vals.immoFinancBrutN1 - vals.immoFinancProvN1);
-  setCell(wsA, 'D29', 'Total des actifs immobilis\u00e9s', { ...labelFont, alignment: { horizontal: 'right' } });
-  setCell(wsA, 'I29', totalImmoN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L29', totalImmoN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // A7 - Autres actifs non courants
-  setCell(wsA, 'A31', 'A7', labelFont);
-  setCell(wsA, 'E31', 'Autres actifs non courants', labelFont);
-  setCell(wsA, 'I31', vals.autresActifsNonCourantsN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L31', vals.autresActifsNonCourantsN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // TOTAL DES ACTIFS NON COURANTS
+  // Total actifs non courants: G27=N, K27=N1
   const totalNCN = totalImmoN + vals.autresActifsNonCourantsN;
   const totalNCN1 = totalImmoN1 + vals.autresActifsNonCourantsN1;
-  setCell(wsA, 'C33', 'TOTAL DES ACTIFS NON COURANTS', labelBoldFont);
-  setCell(wsA, 'I33', totalNCN, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L33', totalNCN1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
+  w(wsA, 26, 6, totalNCN);
+  w(wsA, 26, 10, totalNCN1);
 
-  // ACTIFS COURANTS
-  setCell(wsA, 'C35', 'ACTIFS COURANTS', labelBoldFont);
+  // Stocks: M31=N brut, M32=prov
+  w(wsA, 30, 12, vals.stocksN);
+  w(wsA, 31, 12, vals.stocksProvN);
+  // Stocks net: G33=N, K33=N1
+  w(wsA, 32, 6, vals.stocksN - vals.stocksProvN);
+  w(wsA, 32, 10, vals.stocksN1 - vals.stocksProvN1);
 
-  // A8 - Stocks
-  setCell(wsA, 'A37', 'A8', labelFont);
-  setCell(wsA, 'E37', 'Stocks', labelFont);
-  setCell(wsA, 'I37', vals.stocksN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L37', vals.stocksN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'M37', vals.stocksN - vals.stocksN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Clients prov: G37=N, K37=N1
+  w(wsA, 36, 6, vals.clientsProvN);
+  w(wsA, 36, 10, vals.clientsProvN1);
 
-  // A9 - Provisions stocks
-  setCell(wsA, 'A38', 'A9', labelFont);
-  setCell(wsA, 'E38', 'Moins : provisions', labelFont);
-  setCell(wsA, 'I38', -vals.stocksProvN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L38', -vals.stocksProvN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Total actifs courants: G45=N, K45=N1
+  const totalCourN = (vals.stocksN - vals.stocksProvN)
+    + (vals.clientsN - vals.clientsProvN)
+    + vals.autresActifsCourantsN + vals.tresorerieN;
+  const totalCourN1 = (vals.stocksN1 - vals.stocksProvN1)
+    + (vals.clientsN1 - vals.clientsProvN1)
+    + vals.autresActifsCourantsN1 + vals.tresorerieN1;
+  w(wsA, 44, 6, totalCourN);
+  w(wsA, 44, 10, totalCourN1);
 
-  // Net stocks
-  setCell(wsA, 'I39', vals.stocksN - vals.stocksProvN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L39', vals.stocksN1 - vals.stocksProvN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Total actifs: G47=N, K47=N1
+  w(wsA, 46, 6, totalNCN + totalCourN);
+  w(wsA, 46, 10, totalNCN1 + totalCourN1);
 
-  // A10 - Clients
-  setCell(wsA, 'A41', 'A10', labelFont);
-  setCell(wsA, 'E41', 'Clients et comptes rattach\u00e9s', labelFont);
-  setCell(wsA, 'I41', vals.clientsN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L41', vals.clientsN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'M41', vals.clientsN - vals.clientsN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // A11 - Provisions clients
-  setCell(wsA, 'A42', 'A11', labelFont);
-  setCell(wsA, 'E42', 'Moins : provisions', labelFont);
-  setCell(wsA, 'I42', -vals.clientsProvN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L42', -vals.clientsProvN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // Net clients
-  setCell(wsA, 'I43', vals.clientsN - vals.clientsProvN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L43', vals.clientsN1 - vals.clientsProvN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // A12 - Autres actifs courants
-  setCell(wsA, 'A45', 'A12', labelFont);
-  setCell(wsA, 'E45', 'Autres actifs courants', labelFont);
-  setCell(wsA, 'I45', vals.autresActifsCourantsN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L45', vals.autresActifsCourantsN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'M45', vals.autresActifsCourantsN - vals.autresActifsCourantsN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // A15 - Liquidites
-  setCell(wsA, 'A51', 'A15', labelFont);
-  setCell(wsA, 'E51', 'Liquidit\u00e9s et \u00e9quivalents de liquidit\u00e9s', labelFont);
-  setCell(wsA, 'I51', vals.tresorerieN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L51', vals.tresorerieN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'M51', vals.tresorerieN - vals.tresorerieN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // TOTAL ACTIFS COURANTS
-  const totalCourN = (vals.stocksN - vals.stocksProvN) + (vals.clientsN - vals.clientsProvN) + vals.autresActifsCourantsN + vals.tresorerieN;
-  const totalCourN1 = (vals.stocksN1 - vals.stocksProvN1) + (vals.clientsN1 - vals.clientsProvN1) + vals.autresActifsCourantsN1 + vals.tresorerieN1;
-  setCell(wsA, 'C53', 'TOTAL DES ACTIFS COURANTS', labelBoldFont);
-  setCell(wsA, 'I53', totalCourN, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L53', totalCourN1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // TOTAL ACTIF
-  const totalAN = totalNCN + totalCourN;
-  const totalAN1 = totalNCN1 + totalCourN1;
-  setCell(wsA, 'C56', 'TOTAL DES ACTIFS', labelBoldFont);
-  setCell(wsA, 'I56', totalAN, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsA, 'L56', totalAN1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // ============ PASSIF ============
-  const wsP = wb.addWorksheet('PASSIF', { properties: { defaultColWidth: 12 } });
-  wsP.columns = [
-    { width: 5 }, { width: 35 }, { width: 5 }, { width: 35 },
-    { width: 8 }, { width: 8 }, { width: 15 }, { width: 8 }, { width: 15 }, { width: 14 }
-  ];
-
-  setMerge(wsP, 'A3:J3');
-  setCell(wsP, 'A3', vals.nomSociete, { ...titleFont, alignment: { horizontal: 'center' } });
-  setMerge(wsP, 'A5:J5');
-  setCell(wsP, 'A5', `BILANS COMPARES ARRETES AUX 31 Dec ${vals.anneeN} & 31 Dec ${vals.annexeN1}`, { ...subtitleFont, alignment: { horizontal: 'center' } });
-  setMerge(wsP, 'A7:J7');
-  setCell(wsP, 'A7', '(En dinars tunisiens)', { ...subtitleFont, alignment: { horizontal: 'center' } });
-
-  setCell(wsP, 'B10', 'CAPITAUX PROPRES ET PASSIFS', labelBoldFont);
-  setCell(wsP, 'E10', 'Notes', { ...labelBoldFont, alignment: { horizontal: 'center' } });
-  setCell(wsP, 'H10', new Date(vals.anneeN, 11, 31), { ...dateHeaderFont, alignment: { horizontal: 'right' } }, 'dd/mm/yyyy');
-  setCell(wsP, 'J10', new Date(vals.annexeN1, 11, 31), { ...dateHeaderFont, alignment: { horizontal: 'right' } }, 'dd/mm/yyyy');
-
-  setCell(wsP, 'B12', 'CAPITAUX PROPRES ET PASSIFS', labelBoldFont);
-  setCell(wsP, 'C14', 'Capitaux propres', labelBoldFont);
-
-  setCell(wsP, 'A16', 'P1', labelFont);
-  setCell(wsP, 'D16', 'Capital Social', labelFont);
-  setCell(wsP, 'H16', vals.capitalSocialN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J16', vals.capitalSocialN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsP, 'A17', 'P2', labelFont);
-  setCell(wsP, 'D17', 'R\u00e9serves', labelFont);
-  setCell(wsP, 'H17', vals.reservesN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J17', vals.reservesN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsP, 'A18', 'P3', labelFont);
-  setCell(wsP, 'D18', 'R\u00e9sultats report\u00e9s', labelFont);
-  setCell(wsP, 'H18', vals.resultatsReportesN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J18', vals.resultatsReportesN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsP, 'D20', 'Total capitaux propres avant r\u00e9sultat', labelFont);
-  setCell(wsP, 'H20', vals.capitalSocialN + vals.reservesN + vals.resultatsReportesN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J20', vals.capitalSocialN1 + vals.reservesN1 + vals.resultatsReportesN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsP, 'D22', "R\u00e9sultat de l'exercice", labelFont);
-  setCell(wsP, 'H22', vals.resultatExerciceN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J22', vals.resultatExerciceN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
+  // ===== PASSIF =====
   const totalCPN = vals.capitalSocialN + vals.reservesN + vals.resultatsReportesN + vals.resultatExerciceN;
   const totalCPN1 = vals.capitalSocialN1 + vals.reservesN1 + vals.resultatsReportesN1 + vals.resultatExerciceN1;
-  setCell(wsP, 'B24', 'TOTAL CAPITAUX PROPRES', { ...labelBoldFont });
-  setCell(wsP, 'E24', '4.1', { ...labelBoldFont, alignment: { horizontal: 'center' } });
-  setCell(wsP, 'H24', totalCPN, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J24', totalCPN1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
 
-  setCell(wsP, 'B27', 'PASSIFS', labelBoldFont);
-  setCell(wsP, 'C29', 'Passifs non courants', labelBoldFont);
+  // Total capitaux propres: F15=N, K15=N1
+  w(wsP, 14, 5, vals.capitalSocialN + vals.reservesN + vals.resultatsReportesN);
+  w(wsP, 14, 10, vals.capitalSocialN1 + vals.reservesN1 + vals.resultatsReportesN1);
 
-  setCell(wsP, 'A31', 'P4', labelFont);
-  setCell(wsP, 'D31', 'Emprunts', labelFont);
-  setCell(wsP, 'H31', vals.empruntsN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J31', vals.empruntsN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Total capitaux propres: F19=N, K19=N1
+  w(wsP, 18, 5, totalCPN);
+  w(wsP, 18, 10, totalCPN1);
 
-  setCell(wsP, 'A32', 'P5', labelFont);
-  setCell(wsP, 'D32', 'Autres passifs financiers', labelFont);
-  setCell(wsP, 'H32', vals.autresPassifsFinanciersN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J32', vals.autresPassifsFinanciersN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsP, 'A33', 'P6', labelFont);
-  setCell(wsP, 'D33', 'Provisions', labelFont);
-  setCell(wsP, 'H33', vals.provisionsN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J33', vals.provisionsN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
+  // Total passifs non courants: F30=N, K30=N1
   const totalPNCN = vals.empruntsN + vals.autresPassifsFinanciersN + vals.provisionsN;
   const totalPNCN1 = vals.empruntsN1 + vals.autresPassifsFinanciersN1 + vals.provisionsN1;
-  setCell(wsP, 'C35', 'Total passifs non courants', { ...labelFont, alignment: { horizontal: 'right' } });
-  setCell(wsP, 'H35', totalPNCN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J35', totalPNCN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  w(wsP, 29, 5, totalPNCN);
+  w(wsP, 29, 10, totalPNCN1);
 
-  setCell(wsP, 'C37', 'Passifs courants', labelBoldFont);
-
-  setCell(wsP, 'D39', 'Fournisseurs et comptes rattach\u00e9s', labelFont);
-  setCell(wsP, 'H39', vals.fournisseursN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J39', vals.fournisseursN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsP, 'D40', 'Autres passifs courants', labelFont);
-  setCell(wsP, 'H40', vals.autresPassifsCourantsN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J40', vals.autresPassifsCourantsN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsP, 'D41', 'Concours bancaires et autres passifs financiers', labelFont);
-  setCell(wsP, 'H41', vals.concoursBancairesN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J41', vals.concoursBancairesN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
+  // Total passifs courants: F38=N, K38=N1
   const totalPCN = vals.fournisseursN + vals.autresPassifsCourantsN + vals.concoursBancairesN;
   const totalPCN1 = vals.fournisseursN1 + vals.autresPassifsCourantsN1 + vals.concoursBancairesN1;
-  setCell(wsP, 'C43', 'Total passifs courants', { ...labelFont, alignment: { horizontal: 'right' } });
-  setCell(wsP, 'H43', totalPCN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J43', totalPCN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  w(wsP, 37, 5, totalPCN);
+  w(wsP, 37, 10, totalPCN1);
 
-  const totalPN = totalCPN + totalPNCN + totalPCN;
-  const totalPN1 = totalCPN1 + totalPNCN1 + totalPCN1;
-  setCell(wsP, 'B46', 'TOTAL GENERAL PASSIF + CP', labelBoldFont);
-  setCell(wsP, 'H46', totalPN, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsP, 'J46', totalPN1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Total passifs: F41=N, K41=N1
+  w(wsP, 40, 5, totalPNCN + totalPCN);
+  w(wsP, 40, 10, totalPNCN1 + totalPCN1);
 
-  // ============ RESULTAT ============
-  const wsR = wb.addWorksheet('RESULTAT', { properties: { defaultColWidth: 12 } });
-  wsR.columns = [
-    { width: 5 }, { width: 5 }, { width: 35 }, { width: 8 },
-    { width: 8 }, { width: 15 }, { width: 8 }, { width: 15 }, { width: 14 }
-  ];
+  // Total CP+Passifs: F44=N, K44=N1
+  w(wsP, 43, 5, totalCPN + totalPNCN + totalPCN);
+  w(wsP, 43, 10, totalCPN1 + totalPNCN1 + totalPCN1);
 
-  setMerge(wsR, 'B2:I2');
-  setCell(wsR, 'B2', vals.nomSociete, { ...titleFont, alignment: { horizontal: 'center' } });
-  setMerge(wsR, 'B4:I4');
-  setCell(wsR, 'B4', `ETATS DE RESULTATS COMPARES ARRETES AUX 31 Dec ${vals.anneeN} & 31 Dec ${vals.annexeN1}`, { ...subtitleFont, alignment: { horizontal: 'center' } });
-  setMerge(wsR, 'B6:I6');
-  setCell(wsR, 'B6', '(En dinars tunisiens)', { ...subtitleFont, alignment: { horizontal: 'center' } });
+  // ===== RESULTAT =====
+  // Total produits: G13=N, J13=N1
+  const totalProdN = vals.revenusN + vals.achatsConsommesN;
+  const totalProdN1 = vals.revenusN1 + vals.achatsConsommesN1;
+  w(wsR, 12, 6, totalProdN);
+  w(wsR, 12, 9, totalProdN1);
 
-  setCell(wsR, 'E9', 'Notes', { ...labelBoldFont, alignment: { horizontal: 'center' } });
-  setCell(wsR, 'H9', new Date(vals.anneeN, 11, 31), { ...dateHeaderFont, alignment: { horizontal: 'right' } }, 'dd/mm/yyyy');
-  setCell(wsR, 'I9', new Date(vals.annexeN1, 11, 31), { ...dateHeaderFont, alignment: { horizontal: 'right' } }, 'dd/mm/yyyy');
-
-  const totalProdExpN = vals.revenusN + vals.achatsConsommesN;
+  // Total charges: G23=N, J23=N1
   const totalChargesN = vals.achatsConsommesN + vals.chargesPersonnelN + vals.dotationsAmortN + vals.autresChargesExploitN;
-  const resultatExploitN = totalProdExpN - totalChargesN;
-  const totalProdExpN1 = vals.revenusN1 + vals.achatsConsommesN1;
   const totalChargesN1 = vals.achatsConsommesN1 + vals.chargesPersonnelN1 + vals.dotationsAmortN1 + vals.autresChargesExploitN1;
-  const resultatExploitN1 = totalProdExpN1 - totalChargesN1;
+  w(wsR, 22, 6, totalChargesN);
+  w(wsR, 22, 9, totalChargesN1);
 
-  setCell(wsR, 'B11', "PRODUITS D'EXPLOITATION", labelBoldFont);
-  setCell(wsR, 'A13', 'R1', labelFont);
-  setCell(wsR, 'D13', 'Revenus', labelFont);
-  setCell(wsR, 'E13', '5.1', { ...labelBoldFont, alignment: { horizontal: 'center' } });
-  setCell(wsR, 'H13', vals.revenusN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsR, 'I13', vals.revenusN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Resultat exploitation: G26=N, J26=N1
+  const resExploitN = totalProdN - totalChargesN;
+  const resExploitN1 = totalProdN1 - totalChargesN1;
+  w(wsR, 25, 6, resExploitN);
+  w(wsR, 25, 9, resExploitN1);
 
-  setCell(wsR, 'A14', 'R2', labelFont);
-  setCell(wsR, 'D14', 'Autres produits d\'exploitation', labelFont);
+  // Resultat avant impot: G33=N, J33=N1
+  const resAvantImpN = resExploitN - vals.chargesFinancieresN;
+  const resAvantImpN1 = resExploitN1 - vals.chargesFinancieresN1;
+  w(wsR, 32, 6, resAvantImpN);
+  w(wsR, 32, 9, resAvantImpN1);
 
-  setCell(wsR, 'A15', 'R3', labelFont);
-  setCell(wsR, 'D15', 'Production immobilis\u00e9e', labelFont);
+  // Resultat apres impot: G37=N, J37=N1
+  const resApresImpN = resAvantImpN - vals.impotBeneficesN;
+  const resApresImpN1 = resAvantImpN1 - vals.impotBeneficesN1;
+  w(wsR, 36, 6, resApresImpN);
+  w(wsR, 36, 9, resApresImpN1);
 
-  setCell(wsR, 'D16', 'Transfert de charges', labelFont);
+  // Resultat net: G41=N, J41=N1
+  w(wsR, 40, 6, resApresImpN);
+  w(wsR, 40, 9, resApresImpN1);
 
-  setCell(wsR, 'C17', 'Total des produits d\'exploitation', { ...labelBoldFont });
-  setCell(wsR, 'H17', totalProdExpN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsR, 'I17', totalProdExpN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsR, 'B19', "CHARGES D'EXPLOITATION", labelBoldFont);
-
-  setCell(wsR, 'D21', "Co\u00fbt d'achat des marchandises vendues", labelFont);
-  setCell(wsR, 'E21', '5.2', { ...labelBoldFont, alignment: { horizontal: 'center' } });
-  setCell(wsR, 'H21', vals.achatsConsommesN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsR, 'I21', vals.achatsConsommesN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsR, 'A22', 'R5', labelFont);
-  setCell(wsR, 'D22', 'Charges de personnel', labelFont);
-  setCell(wsR, 'H22', vals.chargesPersonnelN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsR, 'I22', vals.chargesPersonnelN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsR, 'A23', 'R6', labelFont);
-  setCell(wsR, 'D23', 'Dotations aux amortissements et provisions', labelFont);
-  setCell(wsR, 'E23', '5.3', { ...labelBoldFont, alignment: { horizontal: 'center' } });
-  setCell(wsR, 'H23', vals.dotationsAmortN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsR, 'I23', vals.dotationsAmortN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsR, 'A24', 'R7', labelFont);
-  setCell(wsR, 'D24', 'Autres charges d\'exploitation', labelFont);
-  setCell(wsR, 'E24', '5.4', { ...labelBoldFont, alignment: { horizontal: 'center' } });
-  setCell(wsR, 'H24', vals.autresChargesExploitN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsR, 'I24', vals.autresChargesExploitN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsR, 'C25', 'Total des charges d\'exploitation', { ...labelBoldFont });
-  setCell(wsR, 'H25', totalChargesN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsR, 'I25', totalChargesN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsR, 'B27', 'R\u00e9sultat d\'exploitation', { ...labelBoldFont });
-  setCell(wsR, 'H27', resultatExploitN, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsR, 'I27', resultatExploitN1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsR, 'A30', 'R8', labelFont);
-  setCell(wsR, 'D30', 'Charges financi\u00e8res nettes', labelFont);
-  setCell(wsR, 'H30', vals.chargesFinancieresN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsR, 'I30', vals.chargesFinancieresN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  const resultatNetN = resultatExploitN - vals.chargesFinancieresN - vals.impotBeneficesN;
-  const resultatNetN1 = resultatExploitN1 - vals.chargesFinancieresN1 - vals.impotBeneficesN1;
-
-  setCell(wsR, 'B34', 'Imp\u00f4t sur les b\u00e9n\u00e9fices', labelFont);
-  setCell(wsR, 'H34', vals.impotBeneficesN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsR, 'I34', vals.impotBeneficesN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsR, 'A47', 'R12', { ...labelBoldFont });
-  setCell(wsR, 'B47', "R\u00e9sultat net de l'exercice", { ...labelBoldFont });
-  setCell(wsR, 'H47', resultatNetN, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsR, 'I47', resultatNetN1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  // ============ SIG ============
-  const wsS = wb.addWorksheet('SIG', { properties: { defaultColWidth: 12 } });
-  wsS.columns = [
-    { width: 30 }, { width: 40 }, { width: 5 },
-    { width: 8 }, { width: 8 }, { width: 15 }, { width: 15 }
-  ];
-
-  setMerge(wsS, 'A2:G2');
-  setCell(wsS, 'A2', vals.nomSociete, { ...titleFont, alignment: { horizontal: 'center' } });
-  setMerge(wsS, 'A4:G4');
-  setCell(wsS, 'A4', `SOLDES INTERM\u00c9DIAIRES DE GESTION COMPARES ARRETES AUX 31 Dec ${vals.anneeN} & 31 Dec ${vals.annexeN1}`, { ...subtitleFont, alignment: { horizontal: 'center' } });
-  setMerge(wsS, 'A6:G6');
-  setCell(wsS, 'A6', '(En dinars tunisiens)', { ...subtitleFont, alignment: { horizontal: 'center' } });
-
-  setCell(wsS, 'D8', 'Notes', { ...labelBoldFont, alignment: { horizontal: 'center' } });
-  setCell(wsS, 'F8', new Date(vals.anneeN, 11, 31), { ...dateHeaderFont, alignment: { horizontal: 'right' } }, 'dd/mm/yyyy');
-  setCell(wsS, 'G8', new Date(vals.annexeN1, 11, 31), { ...dateHeaderFont, alignment: { horizontal: 'right' } }, 'dd/mm/yyyy');
-
-  setCell(wsS, 'B10', 'Ventes de marchandises', labelFont);
-  setCell(wsS, 'F10', vals.ventesMarchandisesN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G10', vals.ventesMarchandisesN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-
-  setCell(wsS, 'B11', 'Co\u00fbt d\'achat des Mses Vendues', labelFont);
-
+  // ===== SIG =====
   const margeCommN = vals.ventesMarchandisesN - vals.cAchatMarchandisesN;
   const margeCommN1 = vals.ventesMarchandisesN1 - vals.cAchatMarchandisesN1;
-  setCell(wsS, 'A13', 'MARGE COMMERCIALE', { ...labelBoldFont });
-  setCell(wsS, 'F13', margeCommN, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G13', margeCommN1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
 
-  setCell(wsS, 'B15', 'Revenus et autres produits d\'exploitation', labelFont);
-  setCell(wsS, 'B16', 'Production stock\u00e9e', labelFont);
-  setCell(wsS, 'B17', 'Production immobilis\u00e9e', labelFont);
-  setCell(wsS, 'B18', 'Transfert de charges', labelFont);
-  setCell(wsS, 'A19', 'PRODUCTION DE L\'EXERCICE', { ...labelBoldFont });
+  // Marge commerciale: F11=N, J11=N1
+  w(wsS, 10, 5, margeCommN);
+  w(wsS, 10, 9, margeCommN1);
 
-  setCell(wsS, 'F22', -vals.cAchatMarchandisesN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G22', -vals.cAchatMarchandisesN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Production: F16=N, J16=N1
+  w(wsS, 15, 5, vals.revenusN);
+  w(wsS, 15, 9, vals.revenusN1);
 
-  const margeBruteN = margeCommN + vals.revenusN - vals.cAchatMarchandisesN;
-  const margeBruteN1 = margeCommN1 + vals.revenusN1 - vals.cAchatMarchandisesN1;
-  setCell(wsS, 'A24', 'MARGE BRUTE TOTALE', { ...labelBoldFont });
-  setCell(wsS, 'F24', margeBruteN, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G24', margeBruteN1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Marge brute totale: F20=N, J20=N1 (marge comm + production - achats)
+  const margeBruteN = margeCommN + vals.revenusN - vals.achatsConsommesN;
+  const margeBruteN1 = margeCommN1 + vals.revenusN1 - vals.achatsConsommesN1;
+  w(wsS, 19, 5, margeBruteN);
+  w(wsS, 19, 9, margeBruteN1);
 
-  setCell(wsS, 'A25', 'ACTIVIT\u00c9 TOTALE', { ...labelBoldFont });
-  setCell(wsS, 'F25', margeBruteN, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G25', margeBruteN1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Activite totale: F22=N, J22=N1
+  w(wsS, 21, 5, margeBruteN);
+  w(wsS, 21, 9, margeBruteN1);
 
-  setCell(wsS, 'B27', 'Marge brute totale', labelFont);
-  setCell(wsS, 'B28', 'Achats d\'approvisionnements consomm\u00e9s', labelFont);
-  setCell(wsS, 'B30', 'Autres charges externes', labelFont);
-  setCell(wsS, 'F30', -vals.autresChargesExternesN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G30', -vals.autresChargesExternesN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Marge brute totale (detail): F24=N, J24=N1
+  w(wsS, 23, 5, margeBruteN);
+  w(wsS, 23, 9, margeBruteN1);
 
-  const valeurAjN = margeBruteN - vals.autresChargesExternesN;
-  const valeurAjN1 = margeBruteN1 - vals.autresChargesExternesN1;
-  setCell(wsS, 'A32', 'VALEUR AJOUT\u00c9E BRUTE', { ...labelBoldFont });
-  setCell(wsS, 'F32', valeurAjN, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G32', valeurAjN1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Charges externes: F26=N, J26=N1
+  w(wsS, 25, 5, -vals.autresChargesExternesN);
+  w(wsS, 25, 9, -vals.autresChargesExternesN1);
 
-  setCell(wsS, 'B34', 'Imp\u00f4ts et taxes', labelFont);
-  setCell(wsS, 'F34', -vals.impotsTaxesN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G34', -vals.impotsTaxesN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  // VAJ: F28=N, J28=N1
+  const vajN = margeBruteN - vals.autresChargesExternesN;
+  const vajN1 = margeBruteN1 - vals.autresChargesExternesN1;
+  w(wsS, 27, 5, vajN);
+  w(wsS, 27, 9, vajN1);
 
-  setCell(wsS, 'B35', 'Charges de personnel', labelFont);
-  setCell(wsS, 'F35', -vals.chargesPersonnelN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G35', -vals.chargesPersonnelN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Impots et taxes: F30=N, J30=N1
+  w(wsS, 29, 5, -vals.impotsTaxesN);
+  w(wsS, 29, 9, -vals.impotsTaxesN1);
 
-  const ebeN = valeurAjN - vals.impotsTaxesN - vals.chargesPersonnelN;
-  const ebeN1 = valeurAjN1 - vals.impotsTaxesN1 - vals.chargesPersonnelN1;
-  setCell(wsS, 'A37', 'EXC\u00c9DENT BRUT D\'EXPLOITATION', { ...labelBoldFont });
-  setCell(wsS, 'F37', ebeN, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G37', ebeN1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Charges personnel: F31=N, J31=N1
+  w(wsS, 30, 5, -vals.chargesPersonnelN);
+  w(wsS, 30, 9, -vals.chargesPersonnelN1);
 
-  setCell(wsS, 'B39', 'Charges financi\u00e8res nettes', labelFont);
-  setCell(wsS, 'F39', -vals.chargesFinancieresN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G39', -vals.chargesFinancieresN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  // EBE: F33=N, J33=N1
+  const ebeN = vajN - vals.impotsTaxesN - vals.chargesPersonnelN;
+  const ebeN1 = vajN1 - vals.impotsTaxesN1 - vals.chargesPersonnelN1;
+  w(wsS, 32, 5, ebeN);
+  w(wsS, 32, 9, ebeN1);
 
-  const resultatExploitSIG = ebeN - vals.chargesFinancieresN;
-  const resultatExploitSIG1 = ebeN1 - vals.chargesFinancieresN1;
-  setCell(wsS, 'A42', 'R\u00c9SULTAT D\'EXPLOITATION', { ...labelBoldFont });
-  setCell(wsS, 'F42', resultatExploitSIG, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G42', resultatExploitSIG1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Charges financieres: F35=N, J35=N1
+  w(wsS, 34, 5, -vals.chargesFinancieresN);
+  w(wsS, 34, 9, -vals.chargesFinancieresN1);
 
-  setCell(wsS, 'A44', 'IMP\u00d4T SUR LES B\u00c9N\u00c9FICES', labelBoldFont);
-  setCell(wsS, 'F44', vals.impotBeneficesN, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G44', vals.impotBeneficesN1, { ...labelFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Resultat activites ordinaires: F43=N, J43=N1
+  const resOrdN = ebeN - vals.chargesFinancieresN;
+  const resOrdN1 = ebeN1 - vals.chargesFinancieresN1;
+  w(wsS, 42, 5, resOrdN);
+  w(wsS, 42, 9, resOrdN1);
 
-  const resultatNetSIG = resultatExploitSIG - vals.impotBeneficesN;
-  const resultatNetSIG1 = resultatExploitSIG1 - vals.impotBeneficesN1;
-  setCell(wsS, 'A46', 'R\u00c9SULTAT NET DE L\'EXERCICE', { ...labelBoldFont });
-  setCell(wsS, 'F46', resultatNetSIG, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
-  setCell(wsS, 'G46', resultatNetSIG1, { ...labelBoldFont, alignment: { horizontal: 'right' } }, numFmt);
+  // Resultat net: F48=N, J48=N1
+  w(wsS, 47, 5, resOrdN - vals.impotBeneficesN);
+  w(wsS, 47, 9, resOrdN1 - vals.impotBeneficesN1);
 
-  // Write buffer
+  // ===== FLUX MA =====
+  // Resultat net: G10=N, H10=N1
+  w(wsF, 9, 6, vals.variationStocksN !== undefined ? (resApresImpN) : 0);
+  w(wsF, 9, 7, resApresImpN1);
+
+  // Dotations: G12=N, H12=N1
+  w(wsF, 11, 6, vals.dotationsProvisionsN);
+  w(wsF, 11, 7, vals.dotationsProvisionsN1);
+
+  // Variation stocks: G14=N, H14=N1
+  w(wsF, 13, 6, vals.variationStocksN);
+  w(wsF, 13, 7, vals.variationStocksN1);
+
+  // Variation creances: G15=N, H15=N1
+  w(wsF, 14, 6, vals.variationCreancesN);
+  w(wsF, 14, 7, vals.variationCreancesN1);
+
+  // Variation autres actifs: G16=N, H16=N1
+  w(wsF, 15, 6, vals.variationAutresActifsN);
+  w(wsF, 15, 7, vals.variationAutresActifsN1);
+
+  // Variation fournisseurs: G17=N, H17=N1
+  w(wsF, 16, 6, vals.variationFournisseursN);
+  w(wsF, 16, 7, vals.variationFournisseursN1);
+
+  // Flux exploit total: G21=N, H21=N1
+  const fluxExploitN = resApresImpN + vals.dotationsProvisionsN + vals.variationStocksN + vals.variationCreancesN + vals.variationAutresActifsN + vals.variationFournisseursN;
+  const fluxExploitN1 = resApresImpN1 + vals.dotationsProvisionsN1 + vals.variationStocksN1 + vals.variationCreancesN1 + vals.variationAutresActifsN1 + vals.variationFournisseursN1;
+  w(wsF, 20, 6, fluxExploitN);
+  w(wsF, 20, 7, fluxExploitN1);
+
+  // Acquisitions immo: G25=N, H25=N1
+  w(wsF, 24, 6, -vals.acqImmobilisationsN);
+  w(wsF, 24, 7, -vals.acqImmobilisationsN1);
+
+  // Flux invest total: G30=N, H30=N1
+  w(wsF, 29, 6, -vals.acqImmobilisationsN);
+  w(wsF, 29, 7, -vals.acqImmobilisationsN1);
+
+  // Variation tresorerie: G44=N, H44=N1
+  const fluxFinancN = 0;
+  const fluxFinancN1 = 0;
+  const varTresorN = fluxExploitN - vals.acqImmobilisationsN;
+  const varTresorN1 = fluxExploitN1 - vals.acqImmobilisationsN1;
+  w(wsF, 43, 6, varTresorN);
+  w(wsF, 43, 7, varTresorN1);
+
+  // Tresorerie debut: G46=N, H46=N1
+  w(wsF, 45, 6, vals.tresorerieN1);
+  w(wsF, 45, 7, vals.tresorerieN1);
+
+  // Tresorerie fin: G47=N, H47=N1
+  w(wsF, 46, 6, vals.tresorerieN);
+  w(wsF, 46, 7, vals.tresorerieN1);
+
+  // ===== TAB AMT =====
+  // Row 6: D6=N1, I6=N1 (header years)
+  w(wsT, 5, 3, yearN1); w(wsT, 5, 8, yearN1);
+
+  // Immobilisations incorporelles (row 8): D8, G8, I8, L8
+  if (vals.immob.length >= 1) {
+    const inc = vals.immob[vals.immob.length - 3]; // summary incorp
+    w(wsT, 7, 3, inc?.vbN1 || 0);
+    w(wsT, 7, 6, (inc?.vbN || 0) + (inc?.acq || 0) - (inc?.ces || 0));
+    w(wsT, 7, 8, inc?.amortN1 || 0);
+    w(wsT, 7, 11, (inc?.amortN1 || 0) + (inc?.dot || 0) - (inc?.reg || 0));
+  }
+
+  // Immobilisations corporelles total (row 12): D12, E12, G12, I12, J12, L12, M12
+  if (vals.immob.length >= 2) {
+    const corp = vals.immob[vals.immob.length - 2];
+    w(wsT, 11, 3, corp?.vbN1 || 0);
+    w(wsT, 11, 4, corp?.acq || 0);
+    w(wsT, 11, 6, (corp?.vbN || 0) + (corp?.acq || 0) - (corp?.ces || 0));
+    w(wsT, 11, 8, corp?.amortN1 || 0);
+    w(wsT, 11, 9, corp?.dot || 0);
+    w(wsT, 11, 11, (corp?.amortN1 || 0) + (corp?.dot || 0) - (corp?.reg || 0));
+    w(wsT, 11, 12, ((corp?.vbN || 0) + (corp?.acq || 0) - (corp?.ces || 0)) - ((corp?.amortN1 || 0) + (corp?.dot || 0) - (corp?.reg || 0)));
+  }
+
+  // Individual 22x lines (rows 14, 16, 18, 20, 22)
+  const immoRows = [13, 15, 17, 19, 21]; // 0-indexed rows for individual lines
+  const immoLines = vals.immob.filter((_, i) => i < vals.immob.length - 3);
+  for (let i = 0; i < Math.min(immoLines.length, immoRows.length); i++) {
+    const l = immoLines[i];
+    const r = immoRows[i];
+    w(wsT, r, 3, l.vbN1);
+    w(wsT, r, 4, l.acq);
+    w(wsT, r, 6, l.vbN + l.acq - l.ces);
+    w(wsT, r, 8, l.amortN1);
+    w(wsT, r, 9, l.dot);
+    w(wsT, r, 11, l.amortN1 + l.dot - l.reg);
+    w(wsT, r, 12, (l.vbN + l.acq - l.ces) - (l.amortN1 + l.dot - l.reg));
+  }
+
+  // Totals row (row 25): D25, E25, G25, I25, J25, L25, M25
+  const totalVbN1 = vals.immob.reduce((s, l) => s + l.vbN1, 0);
+  const totalAcq = vals.immob.reduce((s, l) => s + l.acq, 0);
+  const totalCes = vals.immob.reduce((s, l) => s + l.ces, 0);
+  const totalDot = vals.immob.reduce((s, l) => s + l.dot, 0);
+  const totalReg = vals.immob.reduce((s, l) => s + l.reg, 0);
+  const totalVbN = vals.immob.reduce((s, l) => s + l.vbN, 0);
+  const totalAmortN1 = vals.immob.reduce((s, l) => s + l.amortN1, 0);
+  const totalAmortN = totalAmortN1 + totalDot - totalReg;
+  w(wsT, 24, 3, totalVbN1);
+  w(wsT, 24, 4, totalAcq);
+  w(wsT, 24, 6, totalVbN + totalAcq - totalCes);
+  w(wsT, 24, 8, totalAmortN1);
+  w(wsT, 24, 9, totalDot);
+  w(wsT, 24, 11, totalAmortN);
+  w(wsT, 24, 12, (totalVbN + totalAcq - totalCes) - totalAmortN);
+
   const buffer = await wb.xlsx.writeBuffer();
   return buffer as ArrayBuffer;
 }
