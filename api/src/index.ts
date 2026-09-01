@@ -535,6 +535,9 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
       if (path === '/api/ef/verify' && method === 'POST') {
         return handleEFVerify(request, env);
       }
+      if (path === '/api/ef/tab-amt' && method === 'POST') {
+        return handleEFTabAmt(request, env);
+      }
 
       // --- FIX TVA 19% ---
       const fixTvaMatch = path.match(/^\/api\/dossiers\/([^/]+)\/fix-tva$/);
@@ -1574,6 +1577,90 @@ Reponds JSON: {"ok":bool,"errors":[{"field":"x","message":"y","severity":"error|
       parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { ok: false, summary: response, errors: [], suggestions: [] };
     } catch {
       parsed = { ok: false, summary: response, errors: [], suggestions: [] };
+    }
+    return json({ ok: true, ...parsed });
+  } catch (e: any) {
+    return json({ error: 'AI error: ' + e.message }, 500);
+  }
+}
+
+// ============================================================
+// EF — AI TAB AMT GENERATION
+// ============================================================
+async function handleEFTabAmt(request: Request, env: Env): Promise<Response> {
+  const b = await request.json() as any;
+  const { balanceN, balanceN1, immob, nomSociete, anneeN } = b;
+
+  const immoLines = (balanceN || []).filter((l: any) => l.compte?.startsWith('22') && Math.abs(l.solde || 0) > 0);
+  const amortLines = (balanceN || []).filter((l: any) => l.compte?.startsWith('28') && Math.abs(l.solde || 0) > 0);
+  const immoIncorp = (balanceN || []).filter((l: any) => l.compte?.startsWith('21') && Math.abs(l.solde || 0) > 0);
+  const amortIncorp = (balanceN || []).filter((l: any) => l.compte?.startsWith('281') && Math.abs(l.solde || 0) > 0);
+
+  const immoLinesN1 = (balanceN1 || []).filter((l: any) => l.compte?.startsWith('22') && Math.abs(l.solde || 0) > 0);
+  const amortLinesN1 = (balanceN1 || []).filter((l: any) => l.compte?.startsWith('28') && Math.abs(l.solde || 0) > 0);
+
+  const immoDetail = immoLines.map((l: any) => {
+    const code = l.compte;
+    const trySwap = '28' + code.slice(2);
+    const amort = amortLines.find((a: any) => a.compte === trySwap);
+    const n1 = immoLinesN1.find((n: any) => n.compte === code);
+    const amortN1 = amortLinesN1.find((a: any) => a.compte === trySwap);
+    return {
+      code, libelle: l.libelle || l.compte, vbN: Math.abs(l.solde),
+      amortN: amort ? Math.abs(amort.solde) : 0,
+      vbN1: n1 ? Math.abs(n1.solde) : 0,
+      amortN1: amortN1 ? Math.abs(amortN1.solde) : 0,
+    };
+  });
+
+  const immoIncorpDetail = immoIncorp.map((l: any) => {
+    const amort = amortIncorp.find((a: any) => a.compte === '28' + l.compte.slice(2));
+    const n1 = (balanceN1 || []).find((n: any) => n.compte === l.compte);
+    const amortN1 = (balanceN1 || []).filter((a: any) => a.compte?.startsWith('281')).find((a: any) => a.compte === '28' + l.compte.slice(2));
+    return {
+      code: l.compte, libelle: l.libelle || l.compte, vbN: Math.abs(l.solde),
+      amortN: amort ? Math.abs(amort.solde) : 0,
+      vbN1: n1 ? Math.abs(n1.solde) : 0,
+      amortN1: amortN1 ? Math.abs(amortN1.solde) : 0,
+    };
+  });
+
+  const prompt = `Expert comptable tunisien PCG. Genere le TABLEAU DE VARIATION DES IMMOBILISATIONS ET DES AMORTISSEMENTS pour "${nomSociete || '?'}" exercice ${anneeN || 2025}.
+
+IMMO INCORPORELLES N:
+${immoIncorpDetail.length > 0 ? immoIncorpDetail.map((l: any) => `  ${l.code} ${l.libelle}: VB_N=${l.vbN}, Amort_N=${l.amortN}, VB_N1=${l.vbN1}, Amort_N1=${l.amortN1}`).join('\n') : '  Aucune'}
+
+IMMO CORPORELLES N (22x):
+${immoDetail.length > 0 ? immoDetail.map((l: any) => `  ${l.code} ${l.libelle}: VB_N=${l.vbN}, Amort_N=${l.amortN}, VB_N1=${l.vbN1}, Amort_N1=${l.amortN1}`).join('\n') : '  Aucune'}
+
+IMMO FINANCIERES N (25x):
+${(balanceN || []).filter((l: any) => l.compte?.startsWith('25') && Math.abs(l.solde || 0) > 0).map((l: any) => `  ${l.compte} ${l.libelle}: VB_N=${Math.abs(l.solde)}`).join('\n') || '  Aucune'}
+
+Regles PCG:
+- VB_N = VB_N1 + Acquisitions - Cessions
+- Amort_N = Amort_N1 + Dotations - Regul
+- VCN = VB_N - Amort_N
+- Les immobilisations incorporelles (21x) sont non amortissables sauf fonds commercial
+- Les dotations viennent du compte 681x dans la balance
+
+Genere un JSON: {"lignes":[{"cat":"nom","vbN":0,"acq":0,"ces":0,"dot":0,"reg":0,"vbN1":0,"amortN1":0}],"summary":"1-2 lignes"} UNIQUEMENT JSON.
+Chaque ligne = 1 compte 22x. Ajoute des lignes totaux (Incorp total, Corp total, Financ total, GRAND TOTAL).
+Les acq/dot sont calculates: acq = VB_N - VB_N1 + Ces, dot = Amort_N - Amort_N1 + Reg.
+Si pas de data N-1, mets vbN1=0, amortN1=0.`;
+
+  try {
+    const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 2000,
+      temperature: 0.1,
+    });
+    const response = aiResponse?.response || aiResponse?.result?.response || JSON.stringify(aiResponse);
+    let parsed;
+    try {
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { lignes: [], summary: response };
+    } catch {
+      parsed = { lignes: [], summary: response };
     }
     return json({ ok: true, ...parsed });
   } catch (e: any) {

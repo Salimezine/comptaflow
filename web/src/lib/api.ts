@@ -100,5 +100,6 @@ export const api = {
   },
   ef: {
     verify: (data: any, signal?: AbortSignal) => req<any>('/ef/verify', { method: 'POST', body: JSON.stringify(data), signal }),
+    tabAmt: (data: any, signal?: AbortSignal) => req<any>('/ef/tab-amt', { method: 'POST', body: JSON.stringify(data), signal }),
   },
 };

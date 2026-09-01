@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { ArrowLeft, Download, Copy, CheckCircle, Upload, FileSpreadsheet, BrainCircuit } from 'lucide-react';
+import { ArrowLeft, Download, Copy, CheckCircle, Upload, FileSpreadsheet, BrainCircuit, Sparkles, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 
@@ -1220,6 +1220,7 @@ export default function EtatsFinanciers() {
   };
 
   // ===== TAB AMT =====
+  const [amtLoading, setAmtLoading] = useState(false);
   const renderTabAmt = () => {
     const headers = ['Categorie', 'VB Ouverture', 'Acquisitions', 'Cessions', 'Dotations', 'Regul', 'VCN Fin'];
     const rows = immob.map(l => ({
@@ -1229,18 +1230,48 @@ export default function EtatsFinanciers() {
     return (
       <div className="space-y-4">
         {renderToolbar("Tableau des Immobilisations", buildTabAmtRows, 'TAB_AMT')}
-        <div className="bg-white border rounded-lg p-3 flex items-center gap-3">
+        <div className="bg-white border rounded-lg p-3 flex flex-wrap items-center gap-3">
           <input ref={fileRefImmob} type="file" accept=".xls,.xlsx,.csv,.txt" className="hidden" onChange={handleFileImportImmob} />
           <button onClick={() => fileRefImmob.current?.click()}
             className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-1.5 rounded text-sm flex items-center gap-2 font-medium">
-            <Upload size={14} /> Importer Extract Immobilisations
+            <Upload size={14} /> Importer Excel
+          </button>
+          <button onClick={async () => {
+            setAmtLoading(true);
+            try {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 60000);
+              const result = await api.ef.tabAmt({
+                balanceN, balanceN1, immob, nomSociete, anneeN
+              }, controller.signal);
+              clearTimeout(timeout);
+              if (result.lignes?.length > 0) {
+                setImmob(result.lignes.map((l: any) => ({
+                  cat: l.cat || '',
+                  vbN: l.vbN || 0, acq: l.acq || 0, ces: l.ces || 0,
+                  dot: l.dot || 0, reg: l.reg || 0,
+                  vbN1: l.vbN1 || 0, amortN1: l.amortN1 || 0,
+                })));
+                setImmobCount(result.lignes.length);
+              }
+            } catch (e: any) {
+              alert('Erreur IA: ' + (e.message || e));
+            } finally {
+              setAmtLoading(false);
+            }
+          }} disabled={amtLoading || balanceN.length === 0}
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-4 py-1.5 rounded text-sm flex items-center gap-2 font-medium">
+            {amtLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            {amtLoading ? 'Génération IA...' : 'Générer avec IA'}
           </button>
           {immobCount > 0 && (
             <span className="text-xs text-purple-600 flex items-center gap-1">
-              <CheckCircle size={14} /> {immobCount} categories importées
+              <CheckCircle size={14} /> {immobCount} lignes
             </span>
           )}
-          <span className="text-xs text-gray-400 ml-auto">Format: Categorie | VB ouverture | Acquisitions | Cessions | Dotations | Regul | Amort N-1</span>
+          {balanceN.length === 0 && (
+            <span className="text-xs text-amber-600">⚠ Importez d'abord la Balance N</span>
+          )}
         </div>
         {renderTable(headers, rows, { label: 'Total', vals: [immob.reduce((s, l) => s + l.vbN1, 0), totalImobAcq, totalImobCes, totalImobDot, totalImobReg, totalImobVCN] })}
       </div>
