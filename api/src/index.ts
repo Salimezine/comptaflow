@@ -1569,17 +1569,26 @@ Reponds JSON: {"ok":bool,"errors":[{"field":"x","message":"y","severity":"error|
 
   try {
     const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
-      messages: [{ role: 'user', content: prompt }],
+      messages: [
+        { role: 'system', content: 'Tu es un expert comptable tunisien PCG. Tu réponds UNIQUEMENT en JSON valide, jamais de texte ni de code.' },
+        { role: 'user', content: prompt },
+      ],
       max_tokens: 1000,
       temperature: 0.1,
     });
-    const response = aiResponse?.response || aiResponse?.result?.response || JSON.stringify(aiResponse);
+    const rawResponse = aiResponse?.response || aiResponse?.result?.response || '';
+    let responseStr = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
     let parsed;
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { ok: false, summary: response, errors: [], suggestions: [] };
+      parsed = JSON.parse(responseStr);
+      if (!parsed.errors) throw new Error('no errors');
     } catch {
-      parsed = { ok: false, summary: response, errors: [], suggestions: [] };
+      try {
+        const jsonMatch = responseStr.match(/\{[\s\S]*\}/);
+        parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { ok: false, summary: responseStr.substring(0, 200), errors: [], suggestions: [] };
+      } catch {
+        parsed = { ok: false, summary: responseStr.substring(0, 200), errors: [], suggestions: [] };
+      }
     }
     return json({ ok: true, ...parsed });
   } catch (e: any) {
@@ -1646,24 +1655,35 @@ Regles PCG:
 - Les immobilisations incorporelles (21x) sont non amortissables sauf fonds commercial
 - Les dotations viennent du compte 681x dans la balance
 
-Genere un JSON: {"lignes":[{"cat":"nom","vbN":0,"acq":0,"ces":0,"dot":0,"reg":0,"vbN1":0,"amortN1":0}],"summary":"1-2 lignes"} UNIQUEMENT JSON.
-Chaque ligne = 1 compte 22x. Ajoute des lignes totaux (Incorp total, Corp total, Financ total, GRAND TOTAL).
-Les acq/dot sont calculates: acq = VB_N - VB_N1 + Ces, dot = Amort_N - Amort_N1 + Reg.
-Si pas de data N-1, mets vbN1=0, amortN1=0.`;
+Genere un JSON UNIQUEMENT. Pas de texte, pas de code, pas d'explication. JUSTE LE JSON.
+Format exact: {"lignes":[{"cat":"nom","vbN":0,"acq":0,"ces":0,"dot":0,"reg":0,"vbN1":0,"amortN1":0}],"summary":"1-2 lignes"}
+Chaque ligne = 1 compte 22x. Ajoute des lignes totaux (Incorp, Corp, Financ, GRAND TOTAL).
+acq = VB_N - VB_N1 + Ces, dot = Amort_N - Amort_N1 + Reg.
+Si pas de data N-1, mets vbN1=0, amortN1=0.
+IMPORTANT: Reponds UNIQUEMENT avec le JSON, rien d'autre.`;
 
   try {
     const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
-      messages: [{ role: 'user', content: prompt }],
+      messages: [
+        { role: 'system', content: 'Tu es un expert comptable. Tu réponds UNIQUEMENT en JSON valide, jamais de texte ni de code.' },
+        { role: 'user', content: prompt },
+      ],
       max_tokens: 2000,
       temperature: 0.1,
     });
-    const response = aiResponse?.response || aiResponse?.result?.response || JSON.stringify(aiResponse);
+    const rawResponse = aiResponse?.response || aiResponse?.result?.response || '';
+    let responseStr = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
     let parsed;
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { lignes: [], summary: response };
+      parsed = JSON.parse(responseStr);
+      if (!parsed.lignes) throw new Error('no lignes');
     } catch {
-      parsed = { lignes: [], summary: response };
+      try {
+        const jsonMatch = responseStr.match(/\{[\s\S]*"lignes"[\s\S]*\}/);
+        parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { lignes: [], summary: responseStr.substring(0, 200) };
+      } catch {
+        parsed = { lignes: [], summary: responseStr.substring(0, 200) };
+      }
     }
     return json({ ok: true, ...parsed });
   } catch (e: any) {
