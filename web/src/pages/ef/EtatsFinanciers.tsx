@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { ArrowLeft, Download, Copy, CheckCircle, Upload, FileSpreadsheet, BrainCircuit, Sparkles, Loader2 } from 'lucide-react';
+import { ArrowLeft, Download, Copy, CheckCircle, Upload, FileSpreadsheet, BrainCircuit, Sparkles, Loader2, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 
@@ -310,6 +310,29 @@ export default function EtatsFinanciers() {
       setImmob(immoLines);
       setImmobCount(immoLines.length);
     }
+    // ===== FLUX AUTO-FILL from N vs N-1 (if N-1 already loaded) =====
+    if (balanceN1.length > 0) {
+      const stocksNA = sumDebit(lignes, ['31', '32', '33', '34', '35', '36', '37']);
+      const stocksN1A = sumDebit(balanceN1, ['31', '32', '33', '34', '35', '36', '37']);
+      const clientsNA = sumDebit(lignes, ['41']);
+      const clientsN1A = sumDebit(balanceN1, ['41']);
+      const frsNA = sumCredit(lignes, ['40']);
+      const frsN1A = sumCredit(balanceN1, ['40']);
+      const autresActifsNA = sumDebit(lignes, ['42', '43', '44', '45', '47', '48']);
+      const autresActifsN1A = sumDebit(balanceN1, ['42', '43', '44', '45', '47', '48']);
+      const dotN = sumSolde(lignes, ['68']);
+      const prodRes = -sumSolde(lignes, ['70']);
+      const chargesRes = Math.abs(sumSolde(lignes, ['60', '61', '62', '63', '64', '66', '681']));
+      setFlux(prev => ({
+        ...prev,
+        variationStocks: stocksNA - stocksN1A,
+        variationCreances: clientsNA - clientsN1A,
+        variationFournisseurs: frsN1A - frsNA,
+        variationAutresActifs: autresActifsN1A - autresActifsNA,
+        dotationsProvisions: dotN,
+        resultatNet: prodRes - chargesRes,
+      }));
+    }
   };
 
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -349,9 +372,9 @@ export default function EtatsFinanciers() {
     // Dotations N-1
     const dotN1 = sumSolde(lignes, ['68']);
 
-    // Resultat N-1
-    const prodN1 = sumSolde(lignes, ['70']);
-    const chargesN1 = sumSolde(lignes, ['60', '61', '62', '63', '64', '66', '681']);
+    // Resultat N-1 — use same sign convention as RESULTAT tab
+    const prodN1 = -sumSolde(lignes, ['70']); // flip: credit→positive
+    const chargesN1 = Math.abs(sumSolde(lignes, ['60', '61', '62', '63', '64', '66', '681'])); // always positive
 
     setFlux(prev => ({
       ...prev,
@@ -739,123 +762,105 @@ export default function EtatsFinanciers() {
   };
 
   // ===== EXPORT ACTIF XLSX =====
-  const styleTitle = { font: { name: 'Arial', bold: true, sz: 14, color: { rgb: '000000' } }, alignment: { horizontal: 'center' } };
-  const styleSubTitle = { font: { name: 'Arial', sz: 11 }, alignment: { horizontal: 'center' } };
-  const styleHeader = { font: { name: 'Arial', bold: true, sz: 11, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '1F4E79' } }, alignment: { horizontal: 'center' }, border: { bottom: { style: 'medium', color: { rgb: '000000' } } } };
-  const styleSection = { font: { name: 'Arial', bold: true, sz: 11, color: { rgb: '1F4E79' } }, border: { bottom: { style: 'thin', color: { rgb: '1F4E79' } } } };
-  const styleLabel = { font: { name: 'Arial', sz: 10 } };
-  const styleLabelBold = { font: { name: 'Arial', bold: true, sz: 10 } };
-  const styleNum = { font: { name: 'Arial', sz: 10 }, numFmt: '#,##0', alignment: { horizontal: 'right' } };
-  const styleNumBold = { font: { name: 'Arial', bold: true, sz: 10 }, numFmt: '#,##0', alignment: { horizontal: 'right' } };
-  const styleTotalRow = { font: { name: 'Arial', bold: true, sz: 10 }, fill: { fgColor: { rgb: 'D6E4F0' } }, border: { top: { style: 'medium', color: { rgb: '1F4E79' } }, bottom: { style: 'double', color: { rgb: '1F4E79' } } } };
-  const styleTotalNum = { font: { name: 'Arial', bold: true, sz: 10 }, numFmt: '#,##0', alignment: { horizontal: 'right' }, fill: { fgColor: { rgb: 'D6E4F0' } }, border: { top: { style: 'medium', color: { rgb: '1F4E79' } }, bottom: { style: 'double', color: { rgb: '1F4E79' } } } };
-
-  const applyStyles = (XLSXLib: any, ws: any, rows: any[][], opts: { sectionRows?: number[]; totalRows?: number[]; headerRow?: number; numCols?: number[] } = {}) => {
-    const { sectionRows = [], totalRows = [], headerRow, numCols = [] } = opts;
-    const range = XLSXLib.utils.decode_range(ws['!ref']);
-    for (let r = range.s.r; r <= range.e.r; r++) {
-      for (let c = range.s.c; c <= range.e.c; c++) {
-        const addr = XLSXLib.utils.encode_cell({ r, c });
-        if (!ws[addr]) continue;
-        const isNum = typeof ws[addr].v === 'number' && ws[addr].v !== 0;
-        if (r === headerRow) {
-          ws[addr].s = styleHeader;
-        } else if (totalRows.includes(r)) {
-          ws[addr].s = isNum || numCols.includes(c) ? styleTotalNum : styleTotalRow;
-        } else if (sectionRows.includes(r)) {
-          ws[addr].s = styleSection;
-        } else if (isNum || numCols.includes(c)) {
-          ws[addr].s = c === 0 || numCols.includes(c) ? styleNum : styleNum;
-        } else if (typeof ws[addr].v === 'string') {
-          ws[addr].s = styleLabel;
-        }
-      }
-    }
-  };
-
-  const exportXLSX = async (sheetName: string, buildRows: () => any[][]) => {
-    const ExcelJS = await import('exceljs');
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet(sheetName);
-    const rows = buildRows();
-    ws.columns = [
-      { width: 5 }, { width: 5 }, { width: 5 }, { width: 42 }, { width: 6 },
-      { width: 8 }, { width: 8 }, { width: 8 }, { width: 16 },
-      { width: 8 }, { width: 8 }, { width: 16 }, { width: 14 }
-    ];
-    rows.forEach((row, ri) => {
-      const excelRow = ws.getRow(ri + 1);
-      row.forEach((val, ci) => {
-        if (val !== null && val !== undefined) {
-          excelRow.getCell(ci + 1).value = val;
-        }
-      });
-      if (ri === 0 || ri === 2 || ri === 4) {
-        excelRow.eachCell({ includeEmpty: true }, (cell: any) => {
-          cell.font = { name: 'Arial', bold: ri === 0, size: ri === 0 ? 14 : 11 };
-          cell.alignment = { horizontal: 'center' };
-        });
-      }
+  const exportXLSX = async (_sheetName: string, buildRows: () => any[][]) => {
+    const { buildEFExcel } = await import('./efTemplate');
+    const buffer = await buildEFExcel({
+      nomSociete, anneeN, annexeN1,
+      immoIncorpBrutN: actif.immoIncorpBrut, immoIncorpBrutN1: actifN1.immoIncorpBrut,
+      immoIncorpAmortN: actif.immoIncorpAmort, immoIncorpAmortN1: actifN1.immoIncorpAmort,
+      immoCorpBrutN: actif.immoCorpBrut, immoCorpBrutN1: actifN1.immoCorpBrut,
+      immoCorpAmortN: actif.immoCorpAmort, immoCorpAmortN1: actifN1.immoCorpAmort,
+      immoFinancBrutN: actif.immoFinancBrut, immoFinancBrutN1: actifN1.immoFinancBrut,
+      immoFinancProvN: actif.immoFinancProv, immoFinancProvN1: actifN1.immoFinancProv,
+      autresActifsNonCourantsN: actif.autresActifsNonCourants, autresActifsNonCourantsN1: actifN1.autresActifsNonCourants,
+      stocksN: actif.stocks, stocksN1: actifN1.stocks,
+      stocksProvN: actif.stocksProv, stocksProvN1: actifN1.stocksProv,
+      clientsN: actif.clients, clientsN1: actifN1.clients,
+      clientsProvN: actif.clientsProv, clientsProvN1: actifN1.clientsProv,
+      autresActifsCourantsN: actif.autresActifsCourants, autresActifsCourantsN1: actifN1.autresActifsCourants,
+      tresorerieN: actif.tresorerie, tresorerieN1: actifN1.tresorerie,
+      capitalSocialN: passif.capitalSocial, capitalSocialN1: passifN1.capitalSocial,
+      reservesN: passif.reserves, reservesN1: passifN1.reserves,
+      resultatsReportesN: passif.resultatsReportes, resultatsReportesN1: passifN1.resultatsReportes,
+      resultatExerciceN: passif.resultatExercice, resultatExerciceN1: passifN1.resultatExercice,
+      empruntsN: passif.emprunts, empruntsN1: passifN1.emprunts,
+      autresPassifsFinanciersN: passif.autresPassifsFinanciers, autresPassifsFinanciersN1: passifN1.autresPassifsFinanciers,
+      provisionsN: passif.provisions, provisionsN1: passifN1.provisions,
+      fournisseursN: passif.fournisseurs, fournisseursN1: passifN1.fournisseurs,
+      autresPassifsCourantsN: passif.autresPassifsCourants, autresPassifsCourantsN1: passifN1.autresPassifsCourants,
+      concoursBancairesN: passif.concoursBancaires, concoursBancairesN1: passifN1.concoursBancaires,
+      revenusN: resultat.revenus, revenusN1: 0,
+      achatsConsommesN: resultat.achatsConsommes, achatsConsommesN1: 0,
+      chargesPersonnelN: resultat.chargesPersonnel, chargesPersonnelN1: 0,
+      dotationsAmortN: resultat.dotationsAmort, dotationsAmortN1: 0,
+      autresChargesExploitN: resultat.autresChargesExploit, autresChargesExploitN1: 0,
+      chargesFinancieresN: chargesFinNettes, chargesFinancieresN1: 0,
+      impotBeneficesN: resultat.impotBenefices, impotBeneficesN1: 0,
+      ventesMarchandisesN: sig.ventesMarchandises, ventesMarchandisesN1: 0,
+      cAchatMarchandisesN: sig.cAchatMarchandises, cAchatMarchandisesN1: 0,
+      autresChargesExternesN: sig.autresChargesExternes, autresChargesExternesN1: 0,
+      impotsTaxesN: sig.impotsTaxes, impotsTaxesN1: 0,
+      dotationsProvisionsN: flux.dotationsProvisions, dotationsProvisionsN1: 0,
+      variationStocksN: flux.variationStocks, variationStocksN1: 0,
+      variationCreancesN: flux.variationCreances, variationCreancesN1: 0,
+      variationAutresActifsN: flux.variationAutresActifs, variationAutresActifsN1: 0,
+      variationFournisseursN: flux.variationFournisseurs, variationFournisseursN1: 0,
+      acqImmobilisationsN: flux.acqImmobilisations, acqImmobilisationsN1: 0,
+      immob,
     });
-    const buffer = await wb.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `EF-${sheetName}-${nomSociete || 'societe'}-${anneeN}.xlsx`;
+    a.href = url; a.download = `EF-${_sheetName}-${nomSociete || 'societe'}-${anneeN}.xlsx`;
     a.click(); URL.revokeObjectURL(url);
   };
 
   const exportAllEF = async () => {
-    const ExcelJS = await import('exceljs');
-    const wb = new ExcelJS.Workbook();
-    const sheets = [
-      { name: 'ACTIF', rows: buildActifRows() },
-      { name: 'PASSIF', rows: buildPassifRows() },
-      { name: 'RESULTAT', rows: buildResultatRows() },
-      { name: 'SIG', rows: buildSigRows() },
-      { name: 'TAB_AMT', rows: buildTabAmtRows() },
-      { name: 'FLUX', rows: buildFluxRows() },
-      { name: 'RESULTAT_FISCAL', rows: buildFiscRows() },
-    ];
-    for (const { name, rows } of sheets) {
-      const ws = wb.addWorksheet(name);
-      ws.columns = [
-        { width: 5 }, { width: 5 }, { width: 5 }, { width: 42 }, { width: 6 },
-        { width: 8 }, { width: 8 }, { width: 8 }, { width: 16 },
-        { width: 8 }, { width: 8 }, { width: 16 }, { width: 14 }
-      ];
-      rows.forEach((row, ri) => {
-        const excelRow = ws.getRow(ri + 1);
-        row.forEach((val, ci) => {
-          if (val !== null && val !== undefined) {
-            excelRow.getCell(ci + 1).value = val;
-          }
-        });
-        if (ri === 0 || ri === 2 || ri === 4) {
-          excelRow.eachCell({ includeEmpty: true }, (cell: any) => {
-            cell.font = { name: 'Arial', bold: ri === 0, size: ri === 0 ? 14 : 11 };
-            cell.alignment = { horizontal: 'center' };
-          });
-        }
-        const isTotalRow = typeof row[0] === 'string' && (row[0].includes('TOTAL') || row[0].includes('MARGE'));
-        const isSectionRow = typeof row[0] === 'string' && row[0] === row[0].toUpperCase() && row[0].length > 3 && !row[0].includes('CONTROLE');
-        excelRow.eachCell({ includeEmpty: true }, (cell: any, ci: number) => {
-          if (typeof cell.value === 'number') {
-            cell.numFmt = '#,##0';
-            cell.alignment = { horizontal: 'right' };
-            cell.font = { ...cell.font, name: 'Arial', size: 10 };
-          } else if (typeof cell.value === 'string' && cell.value) {
-            cell.font = { ...cell.font, name: 'Arial', size: isSectionRow || isTotalRow ? 10 : 10, bold: isSectionRow || isTotalRow || cell.font?.bold };
-          }
-          if (isTotalRow && typeof cell.value === 'number') {
-            cell.font = { ...cell.font, bold: true };
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6E4F0' } };
-            cell.border = { top: { style: 'medium' }, bottom: { style: 'double' } };
-          }
-        });
-      });
-    }
-    const buffer = await wb.xlsx.writeBuffer();
+    const { buildEFExcel } = await import('./efTemplate');
+    const buffer = await buildEFExcel({
+      nomSociete, anneeN, annexeN1,
+      immoIncorpBrutN: actif.immoIncorpBrut, immoIncorpBrutN1: actifN1.immoIncorpBrut,
+      immoIncorpAmortN: actif.immoIncorpAmort, immoIncorpAmortN1: actifN1.immoIncorpAmort,
+      immoCorpBrutN: actif.immoCorpBrut, immoCorpBrutN1: actifN1.immoCorpBrut,
+      immoCorpAmortN: actif.immoCorpAmort, immoCorpAmortN1: actifN1.immoCorpAmort,
+      immoFinancBrutN: actif.immoFinancBrut, immoFinancBrutN1: actifN1.immoFinancBrut,
+      immoFinancProvN: actif.immoFinancProv, immoFinancProvN1: actifN1.immoFinancProv,
+      autresActifsNonCourantsN: actif.autresActifsNonCourants, autresActifsNonCourantsN1: actifN1.autresActifsNonCourants,
+      stocksN: actif.stocks, stocksN1: actifN1.stocks,
+      stocksProvN: actif.stocksProv, stocksProvN1: actifN1.stocksProv,
+      clientsN: actif.clients, clientsN1: actifN1.clients,
+      clientsProvN: actif.clientsProv, clientsProvN1: actifN1.clientsProv,
+      autresActifsCourantsN: actif.autresActifsCourants, autresActifsCourantsN1: actifN1.autresActifsCourants,
+      tresorerieN: actif.tresorerie, tresorerieN1: actifN1.tresorerie,
+      capitalSocialN: passif.capitalSocial, capitalSocialN1: passifN1.capitalSocial,
+      reservesN: passif.reserves, reservesN1: passifN1.reserves,
+      resultatsReportesN: passif.resultatsReportes, resultatsReportesN1: passifN1.resultatsReportes,
+      resultatExerciceN: passif.resultatExercice, resultatExerciceN1: passifN1.resultatExercice,
+      empruntsN: passif.emprunts, empruntsN1: passifN1.emprunts,
+      autresPassifsFinanciersN: passif.autresPassifsFinanciers, autresPassifsFinanciersN1: passifN1.autresPassifsFinanciers,
+      provisionsN: passif.provisions, provisionsN1: passifN1.provisions,
+      fournisseursN: passif.fournisseurs, fournisseursN1: passifN1.fournisseurs,
+      autresPassifsCourantsN: passif.autresPassifsCourants, autresPassifsCourantsN1: passifN1.autresPassifsCourants,
+      concoursBancairesN: passif.concoursBancaires, concoursBancairesN1: passifN1.concoursBancaires,
+      revenusN: resultat.revenus, revenusN1: 0,
+      achatsConsommesN: resultat.achatsConsommes, achatsConsommesN1: 0,
+      chargesPersonnelN: resultat.chargesPersonnel, chargesPersonnelN1: 0,
+      dotationsAmortN: resultat.dotationsAmort, dotationsAmortN1: 0,
+      autresChargesExploitN: resultat.autresChargesExploit, autresChargesExploitN1: 0,
+      chargesFinancieresN: chargesFinNettes, chargesFinancieresN1: 0,
+      impotBeneficesN: resultat.impotBenefices, impotBeneficesN1: 0,
+      ventesMarchandisesN: sig.ventesMarchandises, ventesMarchandisesN1: 0,
+      cAchatMarchandisesN: sig.cAchatMarchandises, cAchatMarchandisesN1: 0,
+      autresChargesExternesN: sig.autresChargesExternes, autresChargesExternesN1: 0,
+      impotsTaxesN: sig.impotsTaxes, impotsTaxesN1: 0,
+      dotationsProvisionsN: flux.dotationsProvisions, dotationsProvisionsN1: 0,
+      variationStocksN: flux.variationStocks, variationStocksN1: 0,
+      variationCreancesN: flux.variationCreances, variationCreancesN1: 0,
+      variationAutresActifsN: flux.variationAutresActifs, variationAutresActifsN1: 0,
+      variationFournisseursN: flux.variationFournisseurs, variationFournisseursN1: 0,
+      acqImmobilisationsN: flux.acqImmobilisations, acqImmobilisationsN1: 0,
+      immob,
+    });
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1410,7 +1415,6 @@ export default function EtatsFinanciers() {
   };
 
   // ===== TAB AMT =====
-  const [amtLoading, setAmtLoading] = useState(false);
   const renderTabAmt = () => {
     const headers = ['Categorie', 'VB Ouverture', 'Acquisitions', 'Cessions', 'Dotations', 'Regul', 'VCN Fin'];
     const rows = immob.map(l => ({
@@ -1426,33 +1430,31 @@ export default function EtatsFinanciers() {
             className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-1.5 rounded text-sm flex items-center gap-2 font-medium">
             <Upload size={14} /> Importer Excel
           </button>
-          <button onClick={async () => {
-            setAmtLoading(true);
-            try {
-              const controller = new AbortController();
-              const timeout = setTimeout(() => controller.abort(), 60000);
-              const result = await api.ef.tabAmt({
-                balanceN, balanceN1, immob, nomSociete, anneeN
-              }, controller.signal);
-              clearTimeout(timeout);
-              if (result.lignes?.length > 0) {
-                setImmob(result.lignes.map((l: any) => ({
-                  cat: l.cat || '',
-                  vbN: l.vbN || 0, acq: l.acq || 0, ces: l.ces || 0,
-                  dot: l.dot || 0, reg: l.reg || 0,
-                  vbN1: l.vbN1 || 0, amortN1: l.amortN1 || 0,
-                })));
-                setImmobCount(result.lignes.length);
-              }
-            } catch (e: any) {
-              alert('Erreur IA: ' + (e.message || e));
-            } finally {
-              setAmtLoading(false);
+          <button onClick={() => {
+            if (balanceN.length === 0) return;
+            const findAmort = (code: string) => {
+              const trySwap = code.slice(0, 2) === '22' ? '28' + code.slice(2) : '';
+              const match = trySwap ? balanceN.find(l => l.compte === trySwap) : null;
+              return match ? Math.abs(match.solde) : 0;
+            };
+            const immoCorpAccounts = balanceN.filter(l => l.compte.startsWith('22') && Math.abs(l.solde) > 0);
+            const newImmob: LigneImob[] = [];
+            for (const acc of immoCorpAccounts) {
+              const name = acc.libelle || acc.compte;
+              const amort = findAmort(acc.compte);
+              newImmob.push({ cat: name, vbN: Math.abs(acc.solde), acq: 0, ces: 0, dot: amort, reg: 0, vbN1: 0, amortN1: 0 });
             }
-          }} disabled={amtLoading || balanceN.length === 0}
+            if (newImmob.length > 0) {
+              newImmob.push({ cat: 'Immobilisations incorporelles', vbN: sumDebit(balanceN, ['21']), acq: 0, ces: 0, dot: sumCredit(balanceN, ['281', '291']), reg: 0, vbN1: 0, amortN1: 0 });
+              newImmob.push({ cat: 'Immobilisations corporelles (total)', vbN: sumDebit(balanceN, ['22', '23', '24']), acq: 0, ces: 0, dot: sumCredit(balanceN, ['282', '284', '292']), reg: 0, vbN1: 0, amortN1: 0 });
+              newImmob.push({ cat: 'Immobilisations financières', vbN: sumDebit(balanceN, ['25', '26']), acq: 0, ces: 0, dot: sumCredit(balanceN, ['295', '296', '297']), reg: 0, vbN1: 0, amortN1: 0 });
+              setImmob(newImmob);
+              setImmobCount(newImmob.length);
+            }
+          }} disabled={balanceN.length === 0}
             className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-4 py-1.5 rounded text-sm flex items-center gap-2 font-medium">
-            {amtLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-            {amtLoading ? 'Génération IA...' : 'Générer avec IA'}
+            <RefreshCw size={14} />
+            Regénérer depuis la balance
           </button>
           {immobCount > 0 && (
             <span className="text-xs text-purple-600 flex items-center gap-1">
