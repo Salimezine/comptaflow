@@ -733,6 +733,32 @@ export default function EtatsFinanciers() {
     a.click(); URL.revokeObjectURL(url);
   };
 
+  const exportAllEF = async () => {
+    const XLSXMod = await import('xlsx');
+    const XLSX = XLSXMod.default || XLSXMod;
+    const wb = XLSX.utils.book_new();
+    const addSheet = (name: string, rows: any[][]) => {
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws['!cols'] = [{ wch: 8 }, { wch: 5 }, { wch: 40 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 18 }, { wch: 5 }, { wch: 5 }, { wch: 18 }, { wch: 5 }, { wch: 18 }, { wch: 18 }];
+      XLSX.utils.book_append_sheet(wb, ws, name);
+    };
+    addSheet('ACTIF', buildActifRows());
+    addSheet('PASSIF', buildPassifRows());
+    addSheet('RESULTAT', buildResultatRows());
+    addSheet('SIG', buildSigRows());
+    addSheet('TAB_AMT', buildTabAmtRows());
+    addSheet('FLUX', buildFluxRows());
+    const b64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `EF-${nomSociete || 'societe'}-${anneeN}.xlsx`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
   const buildActifRows = (): any[][] => [
     [nomSociete],
     [`BILANS COMPARES ARRETES AUX 31 Decembre ${anneeN} & 31 Decembre ${annexeN1}`],
@@ -1351,12 +1377,20 @@ export default function EtatsFinanciers() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <button onClick={() => selected ? setSelected(null) : navigate('/')} className="text-gray-400 hover:text-gray-700"><ArrowLeft size={20} /></button>
-        <div>
-          <h1 className="text-xl font-bold text-gray-800">Etats Financiers</h1>
-          <span className="text-xs text-gray-500">Generation automatique des etats financiers</span>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button onClick={() => selected ? setSelected(null) : navigate('/')} className="text-gray-400 hover:text-gray-700"><ArrowLeft size={20} /></button>
+          <div>
+            <h1 className="text-xl font-bold text-gray-800">Etats Financiers</h1>
+            <span className="text-xs text-gray-500">Generation automatique des etats financiers</span>
+          </div>
         </div>
+        {selected && (
+          <button onClick={exportAllEF}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+            <Download size={16} /> Exporter tout (XLSX)
+          </button>
+        )}
       </div>
       {renderInputs()}
       {/* AI Verification Button */}
