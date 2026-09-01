@@ -92,6 +92,7 @@ export default function ScanDossierPage() {
     let timbre = 0;
     let totalTTC = 0;
     let afterAdressA = false;
+    let hasTimbreLine = false;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
@@ -138,6 +139,7 @@ export default function ScanDossierPage() {
         }
       }
       if (line.match(/^Timbre\s+fiscal$/i)) {
+        hasTimbreLine = true;
         for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
           const v = parseAmount(lines[j].trim());
           if (v !== 0) { timbre = v; break; }
@@ -153,13 +155,17 @@ export default function ScanDossierPage() {
 
     if (!numero || !date) return null;
 
+    // Detect 0% TVA invoices (no TVA line in PDF) → HT goes to 707003
+    const hasTVA = tva19 > 0;
+
     // Map code_client → 411XXX
     const compteClient = clientMap[codeClient] || '411000';
 
     return {
       numero, date_facture: date, client: clientName || codeClient, code_client: codeClient,
       compte_client: compteClient, is_avoir: isAvoir,
-      total_ht_0: 0, total_ht_19: Math.abs(totalHT),
+      total_ht_0: hasTVA ? 0 : Math.abs(totalHT),
+      total_ht_19: hasTVA ? Math.abs(totalHT) : 0,
       tva_19: Math.abs(tva19), fodec: Math.abs(fodec),
       timbre: isAvoir ? 0 : Math.abs(timbre),
       total_ttc: Math.abs(totalTTC),
@@ -198,21 +204,23 @@ export default function ScanDossierPage() {
       const isAvoir = !!f.is_avoir;
       const prefix = isAvoir ? 'AVR' : 'FAC';
       const lib = `${prefix} ${facNum}/${clientName}`;
-      const ttc = ht0 + ht19 + tva + fodec + timbre;
+      // D = sum of all C amounts (ensures balance)
+      const totalCredit = ht19 + ht0 + tva + fodec + timbre;
+      const r = (v: number) => Math.round(v * 1000) / 1000;
 
       if (isAvoir) {
-        if (ttc > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: compteClient, libelle: lib, sens: 'C', montant: Math.round(ttc * 1000) / 1000 });
-        if (ht19 > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '707000', libelle: lib, sens: 'D', montant: Math.round(ht19 * 1000) / 1000 });
-        if (ht0 > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '707003', libelle: lib, sens: 'D', montant: Math.round(ht0 * 1000) / 1000 });
-        if (tva > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '436719', libelle: lib, sens: 'D', montant: Math.round(tva * 1000) / 1000 });
-        if (fodec > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '436780', libelle: lib, sens: 'D', montant: Math.round(fodec * 1000) / 1000 });
+        if (totalCredit > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: compteClient, libelle: lib, sens: 'C', montant: r(totalCredit) });
+        if (ht19 > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '707000', libelle: lib, sens: 'D', montant: r(ht19) });
+        if (ht0 > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '707003', libelle: lib, sens: 'D', montant: r(ht0) });
+        if (tva > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '436719', libelle: lib, sens: 'D', montant: r(tva) });
+        if (fodec > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '436780', libelle: lib, sens: 'D', montant: r(fodec) });
       } else {
-        if (ttc > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: compteClient, libelle: lib, sens: 'D', montant: Math.round(ttc * 1000) / 1000 });
-        if (ht19 > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '707000', libelle: lib, sens: 'C', montant: Math.round(ht19 * 1000) / 1000 });
-        if (ht0 > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '707003', libelle: lib, sens: 'C', montant: Math.round(ht0 * 1000) / 1000 });
-        if (tva > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '436719', libelle: lib, sens: 'C', montant: Math.round(tva * 1000) / 1000 });
-        if (fodec > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '436780', libelle: lib, sens: 'C', montant: Math.round(fodec * 1000) / 1000 });
-        if (timbre > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '437600', libelle: lib, sens: 'C', montant: Math.round(timbre * 1000) / 1000 });
+        if (totalCredit > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: compteClient, libelle: lib, sens: 'D', montant: r(totalCredit) });
+        if (ht19 > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '707000', libelle: lib, sens: 'C', montant: r(ht19) });
+        if (ht0 > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '707003', libelle: lib, sens: 'C', montant: r(ht0) });
+        if (tva > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '436719', libelle: lib, sens: 'C', montant: r(tva) });
+        if (fodec > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '436780', libelle: lib, sens: 'C', montant: r(fodec) });
+        if (timbre > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '437600', libelle: lib, sens: 'C', montant: r(timbre) });
       }
     }
     setLocalEcritures(ecritures);
@@ -284,23 +292,26 @@ export default function ScanDossierPage() {
     let totalHT = 0, totalTVA = 0, totalFODEC = 0, totalTimbre = 0, totalTTC = 0;
     for (const f of localFactures) {
       const ht19 = f.total_ht_19 || 0;
-      const tvaExpected = Math.round(ht19 * 19) / 100;
+      const ht0 = f.total_ht_0 || 0;
+      const htTotal = ht0 + ht19;
       const tvaActual = f.tva_19 || 0;
+      const tvaExpected = ht19 > 0 ? Math.round(ht19 * 19) / 100 : 0;
       const tvaDiff = Math.abs(tvaActual - tvaExpected);
-      const fodecExpected = Math.round(ht19 * 1) / 100;
       const fodecActual = f.fodec || 0;
+      const fodecExpected = ht19 > 0 ? Math.round(ht19 * 1) / 100 : 0;
       const fodecDiff = Math.abs(fodecActual - fodecExpected);
-      const ttcComputed = (f.total_ht_0 || 0) + ht19 + tvaActual + fodecActual + (f.timbre || 0);
-      const ttcDiff = Math.abs(f.total_ttc || 0) - ttcComputed;
-      totalHT += (f.total_ht_0 || 0) + ht19;
+      const ttcComputed = htTotal + tvaActual + fodecActual + (f.timbre || 0);
+      const ttcDeclared = f.total_ttc || ttcComputed;
+      const ttcDiff = Math.abs(ttcDeclared - ttcComputed);
+      totalHT += htTotal;
       totalTVA += tvaActual;
       totalFODEC += fodecActual;
       totalTimbre += f.timbre || 0;
-      totalTTC += f.total_ttc || 0;
+      totalTTC += ttcDeclared;
       const pieceChecks: any[] = [];
       if (tvaDiff > 0.01) { pieceChecks.push({ name: 'TVA', status: 'error', detail: `TVA ${tvaActual} ≠ HT×19% = ${tvaExpected} (ecart ${tvaDiff.toFixed(3)})`, expected: tvaExpected, actual: tvaActual }); errors++; } else { pieceChecks.push({ name: 'TVA', status: 'ok', detail: `TVA ${tvaActual} = HT×19%` }); }
       if (fodecDiff > 0.01) { pieceChecks.push({ name: 'FODEC', status: 'error', detail: `FODEC ${fodecActual} ≠ HT×1% = ${fodecExpected}`, expected: fodecExpected, actual: fodecActual }); errors++; } else { pieceChecks.push({ name: 'FODEC', status: 'ok', detail: `FODEC ${fodecActual} = HT×1%` }); }
-      if (Math.abs(ttcDiff) > 0.01) { pieceChecks.push({ name: 'TTC', status: 'error', detail: `TTC declare ${f.total_ttc} ≠ calcule ${ttcComputed}`, expected: ttcComputed, actual: f.total_ttc }); errors++; } else { pieceChecks.push({ name: 'TTC', status: 'ok', detail: `TTC ${f.total_ttc} = somme lignes` }); }
+      if (Math.abs(ttcDiff) > 0.01) { pieceChecks.push({ name: 'TTC', status: 'error', detail: `TTC declare ${ttcDeclared} ≠ calcule ${ttcComputed}`, expected: ttcComputed, actual: ttcDeclared }); errors++; } else { pieceChecks.push({ name: 'TTC', status: 'ok', detail: `TTC ${ttcDeclared} = somme lignes` }); }
       checks.push({ piece: f.numero, type: f.is_avoir ? 'AVR' : 'FAC', client: f.client, checks: pieceChecks });
     }
     setVerifyResult({ verdict: errors > 0 ? 'ERREUR' : 'OK', errors, totalFactures: localFactures.length, totals: { ht: totalHT, tva: totalTVA, fodec: totalFODEC, timbre: totalTimbre, ttc: totalTTC }, checks });
@@ -309,11 +320,18 @@ export default function ScanDossierPage() {
   const handleFixTVA = () => {
     const fixed = localFactures.map(f => {
       const ht19 = f.total_ht_19 || 0;
-      const tvaExpected = Math.round(ht19 * 19) / 100;
+      const tvaExpected = ht19 > 0 ? Math.round(ht19 * 19) / 100 : 0;
       const tvaActual = f.tva_19 || 0;
-      if (Math.abs(tvaActual - tvaExpected) > 0.01) {
-        const diff = tvaExpected - tvaActual;
-        return { ...f, tva_19: tvaExpected, total_ttc: (f.total_ttc || 0) + diff };
+      const fodecExpected = ht19 > 0 ? Math.round(ht19 * 1) / 100 : 0;
+      const fodecActual = f.fodec || 0;
+      let changed = false;
+      let newTva = tvaActual;
+      let newFodec = fodecActual;
+      if (Math.abs(tvaActual - tvaExpected) > 0.01) { newTva = tvaExpected; changed = true; }
+      if (Math.abs(fodecActual - fodecExpected) > 0.01) { newFodec = fodecExpected; changed = true; }
+      if (changed) {
+        const newTtc = (f.total_ht_0 || 0) + ht19 + newTva + newFodec + (f.timbre || 0);
+        return { ...f, tva_19: newTva, fodec: newFodec, total_ttc: newTtc };
       }
       return f;
     });
