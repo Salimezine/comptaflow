@@ -739,19 +739,66 @@ export default function EtatsFinanciers() {
   };
 
   // ===== EXPORT ACTIF XLSX =====
+  const styleTitle = { font: { name: 'Arial', bold: true, sz: 14, color: { rgb: '000000' } }, alignment: { horizontal: 'center' } };
+  const styleSubTitle = { font: { name: 'Arial', sz: 11 }, alignment: { horizontal: 'center' } };
+  const styleHeader = { font: { name: 'Arial', bold: true, sz: 11, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '1F4E79' } }, alignment: { horizontal: 'center' }, border: { bottom: { style: 'medium', color: { rgb: '000000' } } } };
+  const styleSection = { font: { name: 'Arial', bold: true, sz: 11, color: { rgb: '1F4E79' } }, border: { bottom: { style: 'thin', color: { rgb: '1F4E79' } } } };
+  const styleLabel = { font: { name: 'Arial', sz: 10 } };
+  const styleLabelBold = { font: { name: 'Arial', bold: true, sz: 10 } };
+  const styleNum = { font: { name: 'Arial', sz: 10 }, numFmt: '#,##0', alignment: { horizontal: 'right' } };
+  const styleNumBold = { font: { name: 'Arial', bold: true, sz: 10 }, numFmt: '#,##0', alignment: { horizontal: 'right' } };
+  const styleTotalRow = { font: { name: 'Arial', bold: true, sz: 10 }, fill: { fgColor: { rgb: 'D6E4F0' } }, border: { top: { style: 'medium', color: { rgb: '1F4E79' } }, bottom: { style: 'double', color: { rgb: '1F4E79' } } } };
+  const styleTotalNum = { font: { name: 'Arial', bold: true, sz: 10 }, numFmt: '#,##0', alignment: { horizontal: 'right' }, fill: { fgColor: { rgb: 'D6E4F0' } }, border: { top: { style: 'medium', color: { rgb: '1F4E79' } }, bottom: { style: 'double', color: { rgb: '1F4E79' } } } };
+
+  const applyStyles = (XLSXLib: any, ws: any, rows: any[][], opts: { sectionRows?: number[]; totalRows?: number[]; headerRow?: number; numCols?: number[] } = {}) => {
+    const { sectionRows = [], totalRows = [], headerRow, numCols = [] } = opts;
+    const range = XLSXLib.utils.decode_range(ws['!ref']);
+    for (let r = range.s.r; r <= range.e.r; r++) {
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const addr = XLSXLib.utils.encode_cell({ r, c });
+        if (!ws[addr]) continue;
+        const isNum = typeof ws[addr].v === 'number' && ws[addr].v !== 0;
+        if (r === headerRow) {
+          ws[addr].s = styleHeader;
+        } else if (totalRows.includes(r)) {
+          ws[addr].s = isNum || numCols.includes(c) ? styleTotalNum : styleTotalRow;
+        } else if (sectionRows.includes(r)) {
+          ws[addr].s = styleSection;
+        } else if (isNum || numCols.includes(c)) {
+          ws[addr].s = c === 0 || numCols.includes(c) ? styleNum : styleNum;
+        } else if (typeof ws[addr].v === 'string') {
+          ws[addr].s = styleLabel;
+        }
+      }
+    }
+  };
+
   const exportXLSX = async (sheetName: string, buildRows: () => any[][]) => {
-    const XLSXMod = await import('xlsx');
-    const XLSX = XLSXMod.default || XLSXMod;
+    const ExcelJS = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet(sheetName);
     const rows = buildRows();
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [{ wch: 8 }, { wch: 5 }, { wch: 40 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 18 }, { wch: 5 }, { wch: 5 }, { wch: 18 }, { wch: 5 }, { wch: 18 }, { wch: 18 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    const b64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-    const binary = atob(b64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    ws.columns = [
+      { width: 5 }, { width: 5 }, { width: 5 }, { width: 42 }, { width: 6 },
+      { width: 8 }, { width: 8 }, { width: 8 }, { width: 16 },
+      { width: 8 }, { width: 8 }, { width: 16 }, { width: 14 }
+    ];
+    rows.forEach((row, ri) => {
+      const excelRow = ws.getRow(ri + 1);
+      row.forEach((val, ci) => {
+        if (val !== null && val !== undefined) {
+          excelRow.getCell(ci + 1).value = val;
+        }
+      });
+      if (ri === 0 || ri === 2 || ri === 4) {
+        excelRow.eachCell({ includeEmpty: true }, (cell: any) => {
+          cell.font = { name: 'Arial', bold: ri === 0, size: ri === 0 ? 14 : 11 };
+          cell.alignment = { horizontal: 'center' };
+        });
+      }
+    });
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = `EF-${sheetName}-${nomSociete || 'societe'}-${anneeN}.xlsx`;
@@ -759,26 +806,57 @@ export default function EtatsFinanciers() {
   };
 
   const exportAllEF = async () => {
-    const XLSXMod = await import('xlsx');
-    const XLSX = XLSXMod.default || XLSXMod;
-    const wb = XLSX.utils.book_new();
-    const addSheet = (name: string, rows: any[][]) => {
-      const ws = XLSX.utils.aoa_to_sheet(rows);
-      ws['!cols'] = [{ wch: 8 }, { wch: 5 }, { wch: 40 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 18 }, { wch: 5 }, { wch: 5 }, { wch: 18 }, { wch: 5 }, { wch: 18 }, { wch: 18 }];
-      XLSX.utils.book_append_sheet(wb, ws, name);
-    };
-    addSheet('ACTIF', buildActifRows());
-    addSheet('PASSIF', buildPassifRows());
-    addSheet('RESULTAT', buildResultatRows());
-    addSheet('SIG', buildSigRows());
-    addSheet('TAB_AMT', buildTabAmtRows());
-    addSheet('FLUX', buildFluxRows());
-    addSheet('RESULTAT_FISCAL', buildFiscRows());
-    const b64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-    const binary = atob(b64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const ExcelJS = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    const sheets = [
+      { name: 'ACTIF', rows: buildActifRows() },
+      { name: 'PASSIF', rows: buildPassifRows() },
+      { name: 'RESULTAT', rows: buildResultatRows() },
+      { name: 'SIG', rows: buildSigRows() },
+      { name: 'TAB_AMT', rows: buildTabAmtRows() },
+      { name: 'FLUX', rows: buildFluxRows() },
+      { name: 'RESULTAT_FISCAL', rows: buildFiscRows() },
+    ];
+    for (const { name, rows } of sheets) {
+      const ws = wb.addWorksheet(name);
+      ws.columns = [
+        { width: 5 }, { width: 5 }, { width: 5 }, { width: 42 }, { width: 6 },
+        { width: 8 }, { width: 8 }, { width: 8 }, { width: 16 },
+        { width: 8 }, { width: 8 }, { width: 16 }, { width: 14 }
+      ];
+      rows.forEach((row, ri) => {
+        const excelRow = ws.getRow(ri + 1);
+        row.forEach((val, ci) => {
+          if (val !== null && val !== undefined) {
+            excelRow.getCell(ci + 1).value = val;
+          }
+        });
+        if (ri === 0 || ri === 2 || ri === 4) {
+          excelRow.eachCell({ includeEmpty: true }, (cell: any) => {
+            cell.font = { name: 'Arial', bold: ri === 0, size: ri === 0 ? 14 : 11 };
+            cell.alignment = { horizontal: 'center' };
+          });
+        }
+        const isTotalRow = typeof row[0] === 'string' && (row[0].includes('TOTAL') || row[0].includes('MARGE'));
+        const isSectionRow = typeof row[0] === 'string' && row[0] === row[0].toUpperCase() && row[0].length > 3 && !row[0].includes('CONTROLE');
+        excelRow.eachCell({ includeEmpty: true }, (cell: any, ci: number) => {
+          if (typeof cell.value === 'number') {
+            cell.numFmt = '#,##0';
+            cell.alignment = { horizontal: 'right' };
+            cell.font = { ...cell.font, name: 'Arial', size: 10 };
+          } else if (typeof cell.value === 'string' && cell.value) {
+            cell.font = { ...cell.font, name: 'Arial', size: isSectionRow || isTotalRow ? 10 : 10, bold: isSectionRow || isTotalRow || cell.font?.bold };
+          }
+          if (isTotalRow && typeof cell.value === 'number') {
+            cell.font = { ...cell.font, bold: true };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6E4F0' } };
+            cell.border = { top: { style: 'medium' }, bottom: { style: 'double' } };
+          }
+        });
+      });
+    }
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = `EF-${nomSociete || 'societe'}-${anneeN}.xlsx`;

@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "lucide-react": "^0.400.0",
     "pdfjs-dist": "^4.9.155",
     "react": "^19.0.0",
