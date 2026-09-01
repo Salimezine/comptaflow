@@ -1545,13 +1545,19 @@ async function handleEFVerify(request: Request, env: Env): Promise<Response> {
 
   const prompt = `Expert comptable tunisien PCG. Verifie ces EF de "${nomSociete || '?'}" exercice ${anneeN || 2025}.
 
-BILAN: Actif Net=${actifTotal}, Passif+CP=${passifTotal}, Ecart=${Math.round(actifTotal - passifTotal)}
-RESULTAT: Prod=${totalProd}, Charges=${totalCharges}, ResExploit=${resExploit}, ChargesFin=${chargesFinNettes}, ResNet=${resNet}
-SIG: MargeComm=${margeComm}, MargeBrute=${margeBrute}, VA=${VABrute}, EBE=${EBE}
-IMMO: Incorp(VB=${actif?.immoIncorpBrut||0},Amort=${actif?.immoIncorpAmort||0}), Corp(VB=${actif?.immoCorpBrut||0},Amort=${actif?.immoCorpAmort||0})
+BILAN: Actif=${actifTotal}, Passif+CP=${passifTotal}, Ecart=${Math.round(actifTotal - passifTotal)}
+PASSIF_DETAIL: Capital=${passif?.capitalSocial||0}, Reserves=${passif?.reserves||0}, ResultatReportes=${passif?.resultatsReportes||0}, ResultatExercice=${passif?.resultatExercice||0}
+RESULTAT: Prod=${totalProd}, Charges=${totalCharges}, ResExploit=${resExploit}, ChargesFinNettes=${chargesFinNettes}, ResNet=${resNet}
+SIG: VentesMarch=${sig?.ventesMarchandises||0}, AchatsMarch=${sig?.cAchatMarchandises||0}, MargeComm=${margeComm}, MargeBrute=${margeBrute}, VA=${VABrute}, EBE=${EBE}
+IMMO: IncorpVB=${actif?.immoIncorpBrut||0},IncorpAmort=${actif?.immoIncorpAmort||0}, CorpVB=${actif?.immoCorpBrut||0},CorpAmort=${actif?.immoCorpAmort||0}
 FLUX: VarStocks=${flux?.variationStocks||0}, VarCreances=${flux?.variationCreances||0}, VarFrs=${flux?.variationFournisseurs||0}
 
-Verifie: 1) Actif=Passif? 2) ResNet coherent? 3) SIG calculs justes? 4) Non-compensation? 5) Classification courant/non-courant?
+Verifie ces regles PCG:
+1) Actif Net = Passif+CP (ecart doit etre 0)
+2) ResultatExercice PASSIF doit correspondre approximativement a ResNet RESULTAT (si balance fermee)
+3) SIG: MargeComm=VentesMarch-AchatsMarch, MargeBrute=MargeComm+Revenus-AchatsConsommes
+4) Non-compensation: charges et produits ne doivent pas etre compenses entre eux
+5) Classification: immo=non-courant, stocks/clients/fournisseurs=courant
 
 Reponds JSON: {"ok":bool,"errors":[{"field":"x","message":"y","severity":"error|warning"}],"summary":"2-3 lignes","suggestions":["s1"]} UNIQUEMENT JSON.`;
 
