@@ -122,15 +122,13 @@ export default function EtatsFinanciers() {
   const [anneeN, setAnneeN] = useState(2025);
   const [showImport, setShowImport] = useState(false);
   const [balanceCount, setBalanceCount] = useState(0);
+  const [balanceN, setBalanceN] = useState<BalanceLigne[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const fileRefN1 = useRef<HTMLInputElement>(null);
 
   // ===== IMPORT BALANCE → AUTO-FILL EF =====
-  const applyBalance = (lignes: BalanceLigne[], isN1 = false) => {
-    if (isN1) {
-      // N-1 values: TODO later for comparative
-      return;
-    }
+  const applyBalance = (lignes: BalanceLigne[]) => {
+    setBalanceN(lignes);
     // ACTIF
     setActif({
       immoIncorpBrut: sumSoldeAbs(lignes, ['21']),
@@ -212,8 +210,58 @@ export default function EtatsFinanciers() {
       const lignes = await parseBalanceXLSX(buf);
       applyBalance(lignes);
     }
-    setShowImport(false);
     e.target.value = '';
+  };
+
+  // ===== N-1 BALANCE → FLUX VARIATIONS =====
+  const [balanceN1, setBalanceN1] = useState<BalanceLigne[]>([]);
+
+  const applyBalanceN1 = (lignes: BalanceLigne[]) => {
+    // Auto-fill Flux variations from N vs N-1
+    const stocksN = sumSoldeAbs(balanceN, ['31', '32', '33', '34', '35', '36', '37']);
+    const stocksN1 = sumSoldeAbs(lignes, ['31', '32', '33', '34', '35', '36', '37']);
+    const clientsN = sumSoldeAbs(balanceN, ['41']);
+    const clientsN1 = sumSoldeAbs(lignes, ['41']);
+    const frsN = sumSoldeAbs(balanceN, ['40']);
+    const frsN1 = sumSoldeAbs(lignes, ['40']);
+    const autresActifsN = sumSoldeAbs(balanceN, ['42', '43', '44', '45', '47']);
+    const autresActifsN1 = sumSoldeAbs(lignes, ['42', '43', '44', '45', '47']);
+
+    // Dotations N-1
+    const dotN1 = sumSolde(lignes, ['68']);
+
+    // Resultat N-1
+    const prodN1 = sumSolde(lignes, ['70']);
+    const chargesN1 = sumSolde(lignes, ['60', '61', '62', '63', '64', '66', '681']);
+
+    setFlux(prev => ({
+      ...prev,
+      variationStocks: stocksN - stocksN1,
+      variationCreances: clientsN - clientsN1,
+      variationFournisseurs: frsN1 - frsN,
+      variationAutresActifs: autresActifsN1 - autresActifsN,
+      dotationsProvisions: dotN1,
+      resultatNet: prodN1 - chargesN1,
+    }));
+
+    // Auto-fill Tab AMT from N vs N-1 (immo brut & amort)
+    const immoCorpBrutN = sumSoldeAbs(balanceN, ['22', '23', '24']);
+    const immoCorpBrutN1 = sumSoldeAbs(lignes, ['22', '23', '24']);
+    const immoCorpAmortN = sumSoldeAbs(balanceN, ['282', '284', '292', '2932', '2938', '294']);
+    const immoCorpAmortN1 = sumSoldeAbs(lignes, ['282', '284', '292', '2932', '2938', '294']);
+
+    const immoIncorpBrutN = sumSoldeAbs(balanceN, ['21']);
+    const immoIncorpBrutN1 = sumSoldeAbs(lignes, ['21']);
+    const immoIncorpAmortN = sumSoldeAbs(balanceN, ['281', '291', '2931']);
+    const immoIncorpAmortN1 = sumSoldeAbs(lignes, ['281', '291', '2931']);
+
+    setImmob(prev => prev.map((l, i) => {
+      if (i === 0) return { ...l, vbN1: immoIncorpBrutN1, amortN1: immoIncorpAmortN1 }; // incorp
+      if (i === 2) return { ...l, vbN1: immoCorpBrutN1, amortN1: immoCorpAmortN1 }; // corp
+      return l;
+    }));
+
+    setBalanceN1(lignes);
   };
 
   const handleFileImportN1 = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -228,7 +276,62 @@ export default function EtatsFinanciers() {
       const buf = await file.arrayBuffer();
       lignes = await parseBalanceXLSX(buf);
     }
-    // N-1: store in a separate flag for now
+    applyBalanceN1(lignes);
+    e.target.value = '';
+  };
+
+  // ===== IMPORT IMMOBILISATIONS → TAB AMT =====
+  const [immobCount, setImmobCount] = useState(0);
+  const fileRefImmob = useRef<HTMLInputElement>(null);
+
+  const parseImmobRows = (rows: any[]): { cat: string; vbN: number; acq: number; ces: number; dot: number; reg: number; vbN1: number; amortN1: number }[] => {
+    const results: { cat: string; vbN: number; acq: number; ces: number; dot: number; reg: number; vbN1: number; amortN1: number }[] = [];
+    for (const row of rows) {
+      if (!row || row.length < 2) continue;
+      const cat = String(row[0] || '').trim();
+      if (!cat || cat.length < 3) continue;
+      const parseNum = (v: any) => {
+        if (v === null || v === undefined || v === '' || v === '-') return 0;
+        if (typeof v === 'number') return v;
+        return parseFloat(String(v).replace(/\s/g, '').replace(/,/g, '.')) || 0;
+      };
+      results.push({
+        cat,
+        vbN1: parseNum(row[1]),
+        acq: parseNum(row[2]),
+        ces: parseNum(row[3]),
+        dot: parseNum(row[4]),
+        reg: parseNum(row[5]),
+        vbN: 0,
+        amortN1: parseNum(row[6]),
+      });
+      // Calculate VB N from N-1 + Acq - Ces
+      const last = results[results.length - 1];
+      last.vbN = last.vbN1 + last.acq - last.ces;
+    }
+    return results;
+  };
+
+  const handleFileImportImmob = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    let rows: any[][] = [];
+    if (ext === 'csv' || ext === 'txt') {
+      const text = await file.text();
+      rows = text.trim().split('\n').map(l => l.split(/[;,]/).map(s => s.trim()));
+    } else if (ext === 'xls' || ext === 'xlsx') {
+      const XLSXMod = await import('xlsx');
+      const XLSX = XLSXMod.default || XLSXMod;
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
+    }
+    const parsed = parseImmobRows(rows);
+    if (parsed.length > 0) {
+      setImmob(parsed);
+      setImmobCount(parsed.length);
+    }
     e.target.value = '';
   };
 
@@ -877,6 +980,19 @@ export default function EtatsFinanciers() {
     return (
       <div className="space-y-4">
         {renderToolbar("Tableau des Immobilisations", buildTabAmtRows, 'TAB_AMT')}
+        <div className="bg-white border rounded-lg p-3 flex items-center gap-3">
+          <input ref={fileRefImmob} type="file" accept=".xls,.xlsx,.csv,.txt" className="hidden" onChange={handleFileImportImmob} />
+          <button onClick={() => fileRefImmob.current?.click()}
+            className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-1.5 rounded text-sm flex items-center gap-2 font-medium">
+            <Upload size={14} /> Importer Extract Immobilisations
+          </button>
+          {immobCount > 0 && (
+            <span className="text-xs text-purple-600 flex items-center gap-1">
+              <CheckCircle size={14} /> {immobCount} categories importées
+            </span>
+          )}
+          <span className="text-xs text-gray-400 ml-auto">Format: Categorie | VB ouverture | Acquisitions | Cessions | Dotations | Regul | Amort N-1</span>
+        </div>
         {renderTable(headers, rows, { label: 'Total', vals: [immob.reduce((s, l) => s + l.vbN1, 0), totalImobAcq, totalImobCes, totalImobDot, totalImobReg, totalImobVCN] })}
       </div>
     );
