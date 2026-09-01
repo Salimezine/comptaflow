@@ -1552,21 +1552,18 @@ async function handleEFVerify(request: Request, env: Env): Promise<Response> {
 
   const prompt = `Expert comptable tunisien PCG. Verifie ces EF de "${nomSociete || '?'}" exercice ${anneeN || 2025}.
 
-TOUTES LES VALEURS SONT POSITIVES (en dinars).
 BILAN: Actif=${Math.round(actifTotal*1000)/1000}, Passif+CP=${Math.round(passifTotal*1000)/1000}, Ecart=${Math.round((actifTotal - passifTotal)*1000)/1000}
-PASSIF: Capital=${passif?.capitalSocial||0}, Reserves=${passif?.reserves||0}, ResReportes=${passif?.resultatsReportes||0}, ResExercice=${passif?.resultatExercice||0}
-RESULTAT: Produits=${totalProd}, Charges=${totalCharges}, ResExploit=${resExploit}, ChargesFinNettes=${chargesFinNettes}, ResNet=${resNet}
-SIG: VentesMarch=${Math.abs(sig?.ventesMarchandises||0)}, AchatsMarch=${Math.abs(sig?.cAchatMarchandises||0)}, MargeComm=${margeComm}, Revenus=${Math.abs(sig?.revenus||0)}, AchatsConsommes=${Math.abs(sig?.achatsConsommes||0)}, MargeBrute=${margeBrute}, VA=${VABrute}, EBE=${EBE}
+PASSIF: Capital=${passif?.capitalSocial||0}, Reserves=${passif?.reserves||0}, ResExercice=${passif?.resultatExercice||0}
+RESULTAT: Produits=${totalProd}, Charges=${totalCharges}, ResExploit=${resExploit}, ResNet=${resNet}
+SIG: MargeComm=${margeComm}, MargeBrute=${margeBrute}, VA=${VABrute}, EBE=${EBE}
 
-Formules:
-1) Actif = Passif+CP (ecart ≈ 0, tolerance 1 dinar)
-2) MargeComm = VentesMarch - AchatsMarch
-3) MargeBrute = MargeComm + Revenus - AchatsConsommes
-4) Non-compensation: Produits et Charges restent separés
-5) Classification: immo 2x=non-courant, stocks 3x/clients 41/fournisseurs 40=courant
+Verifie UNIQUEMENT ces regles:
+1) Actif ≈ Passif+CP (ecart max 1 dinar)
+2) Non-compensation: pas de compensation charges/produits
+3) Classification: immo 2x=non-courant, stocks 3x/clients 41/fournisseurs 40=courant
 
-IMPORTANT: Ne signale PAS d'erreur si les donnees ne sont pas complete (valeurs a 0). Signale UNIQUEMENT les incoherences dans les CALCULS fournis.
-Reponds JSON: {"ok":bool,"errors":[{"field":"x","message":"y","severity":"error|warning"}],"summary":"2-3 lignes","suggestions":["s1"]} UNIQUEMENT JSON.`;
+IMPORTANT: Ne verifie PAS les formules de calcul (MargeComm, MargeBrute, etc). Verifie UNIQUEMENT la coherence interne. Si tout est OK, mets errors=[].
+Reponds JSON: {"ok":bool,"errors":[],"summary":"2-3 lignes"} UNIQUEMENT JSON.`;
 
   try {
     const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
