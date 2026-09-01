@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, Table2, Trash2, Download, Zap, Upload, CheckCircle, ShieldCheck, Wrench } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -18,6 +18,10 @@ export default function ScanDossierPage() {
   const [uploading, setUploading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<any>(null);
+
+  // Client-side memory (no DB)
+  const [localFactures, setLocalFactures] = useState<any[]>([]);
+  const [localEcritures, setLocalEcritures] = useState<any[]>([]);
 
   // Manual add form
   const [form, setForm] = useState({ numero: '', date_facture: '', client: '', compte_client: '', total_ht_0: '0', total_ht_19: '0', tva_19: '0', fodec: '0', timbre: '0', total_ttc: '0' });
@@ -39,17 +43,18 @@ export default function ScanDossierPage() {
   useEffect(() => { load(); }, [id]);
 
   const handleUploadPDF = async (files: FileList) => {
-    if (!id || !files.length) return;
+    if (!files.length) return;
     setUploading(true);
+    const newFactures: any[] = [];
     try {
       for (const file of Array.from(files)) {
         const text = await extractTextFromPDF(file);
         const parsed = parseScanInvoice(text);
         if (parsed) {
-          await api.scan.addFacture(id, parsed);
+          newFactures.push({ ...parsed, id: crypto.randomUUID() });
         }
       }
-      await load();
+      setLocalFactures(prev => [...prev, ...newFactures]);
     } catch (e: any) {
       alert('Erreur extraction: ' + e.message);
     }
@@ -178,91 +183,152 @@ export default function ScanDossierPage() {
   };
 
   const handleGenerate = async () => {
-    if (!id) return;
-    setGenerating(true);
-    try {
-      const res = await api.scan.generate(id);
-      alert(`${res.factures} factures → ${res.ecritures} ecritures generées`);
-      await load(true);
-      setTab('ecritures');
-    } catch (e: any) {
-      alert('Erreur: ' + e.message);
+    if (localFactures.length === 0) return;
+    const ecritures: any[] = [];
+    for (const f of localFactures) {
+      const date = f.date_facture;
+      const facNum = f.numero || '';
+      const clientName = f.client || '';
+      const compteClient = f.compte_client || '411000';
+      const ht0 = f.total_ht_0 || 0;
+      const ht19 = f.total_ht_19 || 0;
+      const tva = f.tva_19 || 0;
+      const fodec = f.fodec || 0;
+      const timbre = f.timbre || 0;
+      const isAvoir = !!f.is_avoir;
+      const prefix = isAvoir ? 'AVR' : 'FAC';
+      const lib = `${prefix} ${facNum}/${clientName}`;
+      const ttc = ht0 + ht19 + tva + fodec + timbre;
+
+      if (isAvoir) {
+        if (ttc > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: compteClient, libelle: lib, sens: 'C', montant: Math.round(ttc * 1000) / 1000 });
+        if (ht19 > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '707000', libelle: lib, sens: 'D', montant: Math.round(ht19 * 1000) / 1000 });
+        if (ht0 > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '707003', libelle: lib, sens: 'D', montant: Math.round(ht0 * 1000) / 1000 });
+        if (tva > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '436719', libelle: lib, sens: 'D', montant: Math.round(tva * 1000) / 1000 });
+        if (fodec > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '436780', libelle: lib, sens: 'D', montant: Math.round(fodec * 1000) / 1000 });
+      } else {
+        if (ttc > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: compteClient, libelle: lib, sens: 'D', montant: Math.round(ttc * 1000) / 1000 });
+        if (ht19 > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '707000', libelle: lib, sens: 'C', montant: Math.round(ht19 * 1000) / 1000 });
+        if (ht0 > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '707003', libelle: lib, sens: 'C', montant: Math.round(ht0 * 1000) / 1000 });
+        if (tva > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '436719', libelle: lib, sens: 'C', montant: Math.round(tva * 1000) / 1000 });
+        if (fodec > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '436780', libelle: lib, sens: 'C', montant: Math.round(fodec * 1000) / 1000 });
+        if (timbre > 0) ecritures.push({ numero_doc: facNum, date_operation: date, journal_code: 'VT', compte: '437600', libelle: lib, sens: 'C', montant: Math.round(timbre * 1000) / 1000 });
+      }
     }
-    setGenerating(false);
+    setLocalEcritures(ecritures);
+    setTab('ecritures');
   };
 
-  const handleExportCSV = async (journal?: string) => {
-    if (!id) return;
-    const csv = await api.scan.exportCSV(id, journal);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const handleExportCSV = async () => {
+    if (localEcritures.length === 0) return;
+    const lines: string[] = [];
+    for (const e of localEcritures) {
+      const date = e.date_operation;
+      const [y, m, d] = date.split('-');
+      const dateFormatted = `${d}/${m}/${y}`;
+      const montant = Math.round((e.montant || 0) * 1000) / 1000;
+      const debit = e.sens === 'D' ? montant.toFixed(3) : '0.000';
+      const credit = e.sens === 'C' ? montant.toFixed(3) : '0.000';
+      lines.push(`${e.numero_doc || ''}\t${dateFormatted}\t${e.journal_code || 'VT'}\t${e.libelle || ''}\t${e.compte}\t\t${debit}\t${credit}`);
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `scan_vt_${dossier?.nom || id}.csv`;
+    a.href = url; a.download = `scan_ecritures.csv`;
     a.click(); URL.revokeObjectURL(url);
-    // Auto-cleanup
-    if (confirm('Exporter et supprimer les donnees?')) {
-      await api.scan.cleanup(id);
-      await load(true);
-    }
   };
 
   const handleExportXLSX = async () => {
-    if (!id) return;
-    try {
-      const blob = await api.scan.exportXLSX(id);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `scan_ecritures_${dossier?.nom || id}.xlsx`;
-      a.click(); URL.revokeObjectURL(url);
-    } catch (e: any) {
-      alert('Erreur export XLSX: ' + e.message);
+    if (localEcritures.length === 0) return;
+    const XLSXMod = await import('xlsx');
+    const XLSX = XLSXMod.default || XLSXMod;
+    const header = ['N° pièce comptable', 'Date pièce comptable', 'Journal', 'Libellé', 'N° compte', 'Libellé trésorerie', 'Débit', 'Crédit'];
+    const rows: any[][] = [header];
+    for (const e of localEcritures) {
+      const date = e.date_operation;
+      const [y, m, d] = date.split('-');
+      const dateFormatted = `${d}/${m}/${y}`;
+      const montant = Math.round((e.montant || 0) * 1000) / 1000;
+      rows.push([e.numero_doc || '', dateFormatted, e.journal_code || 'VT', e.libelle || '', e.compte, '', e.sens === 'D' ? montant : 0, e.sens === 'C' ? montant : 0]);
     }
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{ wch: 30 }, { wch: 27 }, { wch: 10 }, { wch: 40 }, { wch: 12 }, { wch: 28 }, { wch: 15 }, { wch: 15 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Ecritures');
+    const b64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `scan_ecritures.xlsx`;
+    a.click(); URL.revokeObjectURL(url);
   };
 
-  const handleDeleteFactures = async () => {
-    if (!id || !confirm('Supprimer toutes les factures?')) return;
-    await api.scan.deleteAllFactures(id);
-    await load();
+  const handleDeleteFactures = () => {
+    if (!confirm('Vider les factures?')) return;
+    setLocalFactures([]);
+    setLocalEcritures([]);
   };
 
-  const handleDeleteEcritures = async (journal?: string) => {
-    if (!id || !confirm('Supprimer toutes les ecritures?')) return;
-    await api.scan.deleteAllEcritures(id, journal);
-    await load(true);
+  const handleDeleteEcritures = () => {
+    if (!confirm('Vider les ecritures?')) return;
+    setLocalEcritures([]);
   };
 
-  const handleVerify = async () => {
-    if (!id) return;
-    setVerifying(true);
-    try {
-      const r = await api.scan.verifyAI(id);
-      setVerifyResult(r);
-    } catch (e: any) {
-      setVerifyResult({ error: e.message });
+  const handleVerify = () => {
+    if (localFactures.length === 0) return;
+    const checks: any[] = [];
+    let errors = 0;
+    let totalHT = 0, totalTVA = 0, totalFODEC = 0, totalTimbre = 0, totalTTC = 0;
+    for (const f of localFactures) {
+      const ht19 = f.total_ht_19 || 0;
+      const tvaExpected = Math.round(ht19 * 19) / 100;
+      const tvaActual = f.tva_19 || 0;
+      const tvaDiff = Math.abs(tvaActual - tvaExpected);
+      const fodecExpected = Math.round(ht19 * 1) / 100;
+      const fodecActual = f.fodec || 0;
+      const fodecDiff = Math.abs(fodecActual - fodecExpected);
+      const ttcComputed = (f.total_ht_0 || 0) + ht19 + tvaActual + fodecActual + (f.timbre || 0);
+      const ttcDiff = Math.abs(f.total_ttc || 0) - ttcComputed;
+      totalHT += (f.total_ht_0 || 0) + ht19;
+      totalTVA += tvaActual;
+      totalFODEC += fodecActual;
+      totalTimbre += f.timbre || 0;
+      totalTTC += f.total_ttc || 0;
+      const pieceChecks: any[] = [];
+      if (tvaDiff > 0.01) { pieceChecks.push({ name: 'TVA', status: 'error', detail: `TVA ${tvaActual} ≠ HT×19% = ${tvaExpected} (ecart ${tvaDiff.toFixed(3)})`, expected: tvaExpected, actual: tvaActual }); errors++; } else { pieceChecks.push({ name: 'TVA', status: 'ok', detail: `TVA ${tvaActual} = HT×19%` }); }
+      if (fodecDiff > 0.01) { pieceChecks.push({ name: 'FODEC', status: 'error', detail: `FODEC ${fodecActual} ≠ HT×1% = ${fodecExpected}`, expected: fodecExpected, actual: fodecActual }); errors++; } else { pieceChecks.push({ name: 'FODEC', status: 'ok', detail: `FODEC ${fodecActual} = HT×1%` }); }
+      if (Math.abs(ttcDiff) > 0.01) { pieceChecks.push({ name: 'TTC', status: 'error', detail: `TTC declare ${f.total_ttc} ≠ calcule ${ttcComputed}`, expected: ttcComputed, actual: f.total_ttc }); errors++; } else { pieceChecks.push({ name: 'TTC', status: 'ok', detail: `TTC ${f.total_ttc} = somme lignes` }); }
+      checks.push({ piece: f.numero, type: f.is_avoir ? 'AVR' : 'FAC', client: f.client, checks: pieceChecks });
     }
-    setVerifying(false);
+    setVerifyResult({ verdict: errors > 0 ? 'ERREUR' : 'OK', errors, totalFactures: localFactures.length, totals: { ht: totalHT, tva: totalTVA, fodec: totalFODEC, timbre: totalTimbre, ttc: totalTTC }, checks });
   };
 
-  const handleFixTVA = async () => {
-    if (!id) return;
-    setVerifying(true);
-    try {
-      await api.scan.fixTVA(id);
-      await load(true);
-      setVerifyResult(null);
-    } catch (e: any) {
-      alert('Erreur: ' + e.message);
-    }
-    setVerifying(false);
+  const handleFixTVA = () => {
+    const fixed = localFactures.map(f => {
+      const ht19 = f.total_ht_19 || 0;
+      const tvaExpected = Math.round(ht19 * 19) / 100;
+      const tvaActual = f.tva_19 || 0;
+      if (Math.abs(tvaActual - tvaExpected) > 0.01) {
+        const diff = tvaExpected - tvaActual;
+        return { ...f, tva_19: tvaExpected, total_ttc: (f.total_ttc || 0) + diff };
+      }
+      return f;
+    });
+    setLocalFactures(fixed);
+    setVerifyResult(null);
+    setLocalEcritures([]);
   };
 
   if (loading) return <div className="text-gray-400 py-10">Chargement...</div>;
   if (!dossier) return <div className="text-red-500 py-10">Dossier non trouve</div>;
 
   const tabs: { key: Tab; label: string; icon: any; count: number }[] = [
-    { key: 'factures', label: 'Factures', icon: FileText, count: factures.length },
-    { key: 'ecritures', label: 'Ecritures VT', icon: Table2, count: ecritures.length },
-    { key: 'export', label: 'Export', icon: Download, count: ecritures.length },
+    { key: 'factures', label: 'Factures', icon: FileText, count: localFactures.length },
+    { key: 'ecritures', label: 'Ecritures VT', icon: Table2, count: localEcritures.length },
+    { key: 'export', label: 'Export', icon: Download, count: localEcritures.length },
   ];
 
   return (
@@ -275,14 +341,16 @@ export default function ScanDossierPage() {
           <span className="text-xs text-gray-500">SCANFLASH</span>
         </div>
         <div className="ml-auto flex gap-2">
-          <button onClick={() => load(true)} className="text-sm text-gray-500 hover:text-gray-700">Rafraichir</button>
+          {(localFactures.length > 0 || localEcritures.length > 0) && (
+            <button onClick={() => { if (confirm('Tout vider?')) { setLocalFactures([]); setLocalEcritures([]); setVerifyResult(null); } }} className="text-sm text-red-500 hover:text-red-700">Tout vider</button>
+          )}
         </div>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 border-b">
         {tabs.map(t => (
-          <button key={t.key} onClick={() => { setTab(t.key); if (t.key === 'ecritures' && ecritures.length === 0) load(true); }}
+          <button key={t.key} onClick={() => setTab(t.key)}
             className={`flex items-center gap-1 px-4 py-2 text-sm font-medium border-b-2 transition ${
               tab === t.key ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             <t.icon size={15} />
@@ -303,8 +371,13 @@ export default function ScanDossierPage() {
                 {uploading ? 'Extraction...' : 'Importer PDF(s)'}
                 <input type="file" accept=".pdf" multiple className="hidden" onChange={e => e.target.files && handleUploadPDF(e.target.files)} />
               </label>
-              <span className="text-xs text-gray-400">{factures.length} factures importees</span>
-              {factures.length > 0 && (
+              {localFactures.length > 0 && (
+                <button onClick={handleGenerate} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+                  <Zap size={15} className="inline mr-1" /> Generer VT
+                </button>
+              )}
+              <span className="text-xs text-gray-400">{localFactures.length} factures importees</span>
+              {localFactures.length > 0 && (
                 <button onClick={handleDeleteFactures} className="text-red-400 hover:text-red-600 text-xs ml-auto"><Trash2 size={14} className="inline mr-1" /> Tout supprimer</button>
               )}
             </div>
@@ -371,7 +444,7 @@ export default function ScanDossierPage() {
                 </tr>
               </thead>
               <tbody>
-                {factures.map(f => (
+                {localFactures.map(f => (
                   <tr key={f.id} className="border-t hover:bg-gray-50">
                     <td className="px-3 py-1.5 font-mono text-xs">
                       {f.is_avoir ? <span className="text-red-600 font-bold">AVR</span> : 'FAC'} {f.numero}
@@ -387,7 +460,7 @@ export default function ScanDossierPage() {
                     <td className="px-3 py-1.5 text-right font-mono font-semibold">{(f.total_ttc || 0).toFixed(3)}</td>
                   </tr>
                 ))}
-                {factures.length === 0 && <tr><td colSpan={10} className="text-center text-gray-400 py-6">Aucune facture</td></tr>}
+                {localFactures.length === 0 && <tr><td colSpan={10} className="text-center text-gray-400 py-6">Aucune facture</td></tr>}
               </tbody>
             </table>
           </div>
@@ -412,9 +485,9 @@ export default function ScanDossierPage() {
             <button onClick={() => handleExportCSV()} className="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700">
               <Download size={14} className="inline mr-1" /> Export CSV VT
             </button>
-            {ecritures.length > 0 && (
+            {localEcritures.length > 0 && (
               <button onClick={() => handleDeleteEcritures()} className="text-red-400 hover:text-red-600 text-sm border border-red-200 px-3 py-1.5 rounded">
-                <Trash2 size={14} className="inline mr-1" /> Supprimer ecritures
+                <Trash2 size={14} className="inline mr-1" /> Vider ecritures
               </button>
             )}
           </div>
@@ -432,17 +505,16 @@ export default function ScanDossierPage() {
                 <option value="C">Credit</option>
               </select>
               <input placeholder="Montant" type="number" step="0.001" id="ecr-montant" className="border rounded px-2 py-1.5" />
-              <button onClick={async () => {
+              <button onClick={() => {
                 const date = (document.getElementById('ecr-date') as HTMLInputElement).value;
                 const piece = (document.getElementById('ecr-piece') as HTMLInputElement).value;
                 const compte = (document.getElementById('ecr-compte') as HTMLInputElement).value;
                 const libelle = (document.getElementById('ecr-libelle') as HTMLInputElement).value;
                 const sens = (document.getElementById('ecr-sens') as HTMLSelectElement).value;
                 const montant = parseFloat((document.getElementById('ecr-montant') as HTMLInputElement).value) || 0;
-                if (!id || !date || !compte || montant <= 0) return alert('Remplir tous les champs');
-                await api.scan.addEcriture(id, { date_operation: date, numero_doc: piece, compte, libelle, sens, montant, journal_code: 'VT' });
+                if (!date || !compte || montant <= 0) return alert('Remplir tous les champs');
+                setLocalEcritures(prev => [...prev, { id: crypto.randomUUID(), numero_doc: piece, date_operation: date, journal_code: 'VT', compte, libelle, sens, montant }]);
                 (document.getElementById('ecr-montant') as HTMLInputElement).value = '';
-                load(true);
               }} className="bg-emerald-500 text-white rounded px-3 py-1.5 hover:bg-emerald-600">+</button>
             </div>
           </div>
@@ -463,7 +535,7 @@ export default function ScanDossierPage() {
                 </tr>
               </thead>
               <tbody>
-                {ecritures.map(e => (
+                {localEcritures.map(e => (
                   <tr key={e.id} className="border-t hover:bg-gray-50">
                     <td className="px-3 py-1.5 text-xs">{e.date_operation}</td>
                     <td className="px-3 py-1.5 text-xs font-mono">{e.journal_code}</td>
@@ -476,11 +548,11 @@ export default function ScanDossierPage() {
                     <td className="px-3 py-1.5 text-right font-mono text-xs">{e.sens === 'D' ? (e.montant || 0).toFixed(3) : ''}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-xs">{e.sens === 'C' ? (e.montant || 0).toFixed(3) : ''}</td>
                     <td className="px-1">
-                      <button onClick={async () => { if (confirm('Supprimer?')) { await api.scan.deleteEcriture(e.id); load(true); } }} className="text-red-400 hover:text-red-600"><Trash2 size={12} /></button>
+                      <button onClick={() => setLocalEcritures(prev => prev.filter(x => x.id !== e.id))} className="text-red-400 hover:text-red-600"><Trash2 size={12} /></button>
                     </td>
                   </tr>
                 ))}
-                {ecritures.length === 0 && <tr><td colSpan={9} className="text-center text-gray-400 py-6">Aucune ecriture</td></tr>}
+                {localEcritures.length === 0 && <tr><td colSpan={9} className="text-center text-gray-400 py-6">Aucune ecriture - cliquer "Generer VT" ou ajouter manuellement</td></tr>}
               </tbody>
             </table>
           </div>
@@ -500,15 +572,15 @@ export default function ScanDossierPage() {
               <button onClick={handleExportXLSX} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
                 <Download size={15} className="inline mr-1" /> Export XLSX
               </button>
-              <button onClick={handleVerify} disabled={verifying || factures.length === 0} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
-                <ShieldCheck size={15} className="inline mr-1" /> {verifying ? 'Verification...' : 'Verifier TVA 19%'}
+              <button onClick={handleVerify} disabled={localFactures.length === 0} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
+                <ShieldCheck size={15} className="inline mr-1" /> Verifier TVA 19%
               </button>
               {verifyResult && verifyResult.errors > 0 && (
-                <button onClick={handleFixTVA} disabled={verifying} className="bg-amber-600 text-white px-4 py-2 rounded text-sm hover:bg-amber-700 disabled:opacity-50">
+                <button onClick={handleFixTVA} className="bg-amber-600 text-white px-4 py-2 rounded text-sm hover:bg-amber-700">
                   <Wrench size={15} className="inline mr-1" /> Corriger TVA
                 </button>
               )}
-              <span className="text-sm text-gray-500">{factures.length} factures / {ecritures.length} ecritures</span>
+              <span className="text-sm text-gray-500">{localFactures.length} factures / {localEcritures.length} ecritures</span>
             </div>
 
             {verifyResult && !verifyResult.error && (
@@ -548,12 +620,12 @@ export default function ScanDossierPage() {
             {verifyResult?.error && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-600">{verifyResult.error}</div>
             )}
-            {ecritures.length > 0 && (
+            {localEcritures.length > 0 && (
               <div className="bg-gray-50 rounded p-3 text-xs text-gray-600 max-h-48 overflow-auto">
                 <table className="w-full">
                   <thead><tr className="text-gray-500"><th className="text-left pr-3">Date</th><th className="text-left pr-3">Piece</th><th className="text-left pr-3">Compte</th><th className="text-right pr-3">D</th><th className="text-right">C</th></tr></thead>
                   <tbody>
-                    {ecritures.slice(0, 30).map(e => (
+                    {localEcritures.slice(0, 30).map(e => (
                       <tr key={e.id} className="border-t border-gray-200">
                         <td className="pr-3">{e.date_operation}</td>
                         <td className="pr-3 font-mono">{e.numero_doc}</td>
@@ -564,7 +636,7 @@ export default function ScanDossierPage() {
                     ))}
                   </tbody>
                 </table>
-                {ecritures.length > 30 && <div className="text-gray-400 mt-1">... {ecritures.length - 30} lignes de plus</div>}
+                {localEcritures.length > 30 && <div className="text-gray-400 mt-1">... {localEcritures.length - 30} lignes de plus</div>}
               </div>
             )}
           </div>
