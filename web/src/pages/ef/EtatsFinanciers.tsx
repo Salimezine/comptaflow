@@ -142,13 +142,13 @@ function sumSoldeAbs(lignes: BalanceLigne[], prefixes: string[]): number {
 function sumDebit(lignes: BalanceLigne[], prefixes: string[]): number {
   return lignes
     .filter(l => prefixes.some(p => l.compte.startsWith(p)))
-    .reduce((s, l) => s + l.debit, 0);
+    .reduce((s, l) => s + (l.solde > 0 ? l.solde : 0), 0);
 }
 
 function sumCredit(lignes: BalanceLigne[], prefixes: string[]): number {
   return lignes
     .filter(l => prefixes.some(p => l.compte.startsWith(p)))
-    .reduce((s, l) => s + l.credit, 0);
+    .reduce((s, l) => s + (l.solde < 0 ? Math.abs(l.solde) : 0), 0);
 }
 
 type EFType = 'actif' | 'passif' | 'resultat' | 'tab-amt' | 'flux' | 'sig';
@@ -205,33 +205,51 @@ export default function EtatsFinanciers() {
     setBalanceN(lignes);
     // ACTIF
     setActif({
-      immoIncorpBrut: sumSoldeAbs(lignes, ['21']),
-      immoIncorpAmort: sumSoldeAbs(lignes, ['281', '291', '2931']),
-      immoCorpBrut: sumSoldeAbs(lignes, ['22', '23', '24']),
-      immoCorpAmort: sumSoldeAbs(lignes, ['282', '284', '292', '2932', '2938', '294']),
-      immoFinancBrut: sumSoldeAbs(lignes, ['25', '26']),
-      immoFinancProv: sumSoldeAbs(lignes, ['295', '296', '297']),
-      autresActifsNonCourants: sumSoldeAbs(lignes, ['27']),
-      stocks: sumSoldeAbs(lignes, ['31', '32', '33', '34', '35', '36', '37']),
-      stocksProv: sumSoldeAbs(lignes, ['39']),
-      clients: sumSoldeAbs(lignes, ['41']),
-      clientsProv: sumSoldeAbs(lignes, ['491']),
-      autresActifsCourants: sumSoldeAbs(lignes, ['40', '42', '43', '44', '45', '47', '48'])
-        - sumSoldeAbs(lignes, ['491', '495', '496']),
-      tresorerie: sumSoldeAbs(lignes, ['53', '54', '51', '52', '55']) - sumSoldeAbs(lignes, ['59']),
+      immoIncorpBrut: sumDebit(lignes, ['21']),
+      immoIncorpAmort: sumCredit(lignes, ['281', '291', '2931']),
+      immoCorpBrut: sumDebit(lignes, ['22', '23', '24']),
+      immoCorpAmort: sumCredit(lignes, ['282', '284', '292', '2932', '2938', '294']),
+      immoFinancBrut: sumDebit(lignes, ['25', '26']),
+      immoFinancProv: sumCredit(lignes, ['295', '296', '297']),
+      autresActifsNonCourants: sumDebit(lignes, ['27']),
+      stocks: sumDebit(lignes, ['31', '32', '33', '34', '35', '36', '37']),
+      stocksProv: sumCredit(lignes, ['39']),
+      clients: sumDebit(lignes, ['41']),
+      clientsProv: sumCredit(lignes, ['491']),
+      autresActifsCourants: sumDebit(lignes, ['42', '43', '44', '45', '47', '48'])
+        - sumCredit(lignes, ['491', '495', '496']),
+      tresorerie: sumDebit(lignes, ['53', '54', '51', '52', '55']) - sumCredit(lignes, ['59']),
     });
-    // PASSIF
+    // PASSIF — compute resultatExercice from income statement (balance may not be closed)
+    const autresPassif = sumCredit(lignes, ['101'])
+      + sumCredit(lignes, ['111', '112', '117', '118'])
+      + sumCredit(lignes, ['121', '128'])
+      + sumCredit(lignes, ['16'])
+      + sumCredit(lignes, ['18'])
+      + sumCredit(lignes, ['15'])
+      + sumCredit(lignes, ['40'])
+      + sumCredit(lignes, ['419', '422', '423', '425', '427', '428', '432', '433', '434', '435', '436', '437', '438', '441', '442', '447', '448', '453', '454', '457', '458', '46', '472', '48'])
+      + sumCredit(lignes, ['501', '505', '506', '507', '508', '532', '537']);
+    const totalActifCalc = (sumDebit(lignes, ['21']) - sumCredit(lignes, ['281', '291', '2931']))
+      + (sumDebit(lignes, ['22', '23', '24']) - sumCredit(lignes, ['282', '284', '292', '2932', '2938', '294']))
+      + (sumDebit(lignes, ['25', '26']) - sumCredit(lignes, ['295', '296', '297']))
+      + sumDebit(lignes, ['27'])
+      + (sumDebit(lignes, ['31', '32', '33', '34', '35', '36', '37']) - sumCredit(lignes, ['39']))
+      + (sumDebit(lignes, ['41']) - sumCredit(lignes, ['491']))
+      + (sumDebit(lignes, ['42', '43', '44', '45', '47', '48']) - sumCredit(lignes, ['491', '495', '496']))
+      + (sumDebit(lignes, ['53', '54', '51', '52', '55']) - sumCredit(lignes, ['59']));
+    const resultatFromIncome = totalActifCalc - autresPassif;
     setPassif({
-      capitalSocial: Math.abs(sumSolde(lignes, ['101'])),
-      reserves: Math.abs(sumSolde(lignes, ['111', '112', '117', '118'])),
-      resultatsReportes: Math.abs(sumSolde(lignes, ['121', '128'])),
-      resultatExercice: Math.abs(sumSolde(lignes, ['131', '135'])),
-      emprunts: Math.abs(sumSolde(lignes, ['16'])),
-      autresPassifsFinanciers: Math.abs(sumSolde(lignes, ['18'])) - Math.abs(sumSoldeAbs(lignes, ['18'])),
-      provisions: Math.abs(sumSolde(lignes, ['15'])),
-      fournisseurs: Math.abs(sumSolde(lignes, ['40'])),
-      autresPassifsCourants: Math.abs(sumSolde(lignes, ['419', '422', '423', '425', '427', '428', '432', '433', '434', '435', '436', '437', '438', '441', '442', '447', '448', '453', '454', '457', '458', '46', '472', '48'])),
-      concoursBancaires: Math.abs(sumSolde(lignes, ['501', '505', '506', '507', '508', '532', '537'])),
+      capitalSocial: sumCredit(lignes, ['101']),
+      reserves: sumCredit(lignes, ['111', '112', '117', '118']),
+      resultatsReportes: sumCredit(lignes, ['121', '128']),
+      resultatExercice: Math.abs(resultatFromIncome),
+      emprunts: sumCredit(lignes, ['16']),
+      autresPassifsFinanciers: sumCredit(lignes, ['18']),
+      provisions: sumCredit(lignes, ['15']),
+      fournisseurs: sumCredit(lignes, ['40']),
+      autresPassifsCourants: sumCredit(lignes, ['419', '422', '423', '425', '427', '428', '432', '433', '434', '435', '436', '437', '438', '441', '442', '447', '448', '453', '454', '457', '458', '46', '472', '48']),
+      concoursBancaires: sumCredit(lignes, ['501', '505', '506', '507', '508', '532', '537']),
     });
     // RESULTAT
     setResultat({
