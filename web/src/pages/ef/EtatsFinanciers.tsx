@@ -357,6 +357,54 @@ export default function EtatsFinanciers() {
       return l;
     }));
 
+    // Auto-fill Bilan N-1 (actif + passif) from balance
+    setActifN1({
+      immoIncorpBrut: sumDebit(lignes, ['21']),
+      immoIncorpAmort: sumCredit(lignes, ['281', '291', '2931']),
+      immoCorpBrut: sumDebit(lignes, ['22', '23', '24']),
+      immoCorpAmort: sumCredit(lignes, ['282', '284', '292', '2932', '2938', '294']),
+      immoFinancBrut: sumDebit(lignes, ['25', '26']),
+      immoFinancProv: sumCredit(lignes, ['295', '296', '297']),
+      autresActifsNonCourants: sumDebit(lignes, ['27']),
+      stocks: sumDebit(lignes, ['31', '32', '33', '34', '35', '36', '37']),
+      stocksProv: sumCredit(lignes, ['39']),
+      clients: sumDebit(lignes, ['41']),
+      clientsProv: sumCredit(lignes, ['491']),
+      autresActifsCourants: sumDebit(lignes, ['42', '43', '44', '45', '47', '48'])
+        - sumCredit(lignes, ['491', '495', '496']),
+      tresorerie: sumDebit(lignes, ['53', '54', '51', '52', '55']) - sumCredit(lignes, ['59']),
+    });
+
+    const autresPassifN1 = sumCredit(lignes, ['101'])
+      + sumCredit(lignes, ['111', '112', '117', '118'])
+      + sumCredit(lignes, ['121', '128'])
+      + sumCredit(lignes, ['16'])
+      + sumCredit(lignes, ['18'])
+      + sumCredit(lignes, ['15'])
+      + sumCredit(lignes, ['40'])
+      + sumCredit(lignes, ['419', '422', '423', '425', '427', '428', '432', '433', '434', '435', '436', '437', '438', '441', '442', '447', '448', '453', '454', '457', '458', '46', '472', '48'])
+      + sumCredit(lignes, ['501', '505', '506', '507', '508', '532', '537']);
+    const totalActifN1Calc = (sumDebit(lignes, ['21']) - sumCredit(lignes, ['281', '291', '2931']))
+      + (sumDebit(lignes, ['22', '23', '24']) - sumCredit(lignes, ['282', '284', '292', '2932', '2938', '294']))
+      + (sumDebit(lignes, ['25', '26']) - sumCredit(lignes, ['295', '296', '297']))
+      + sumDebit(lignes, ['27'])
+      + (sumDebit(lignes, ['31', '32', '33', '34', '35', '36', '37']) - sumCredit(lignes, ['39']))
+      + (sumDebit(lignes, ['41']) - sumCredit(lignes, ['491']))
+      + (sumDebit(lignes, ['42', '43', '44', '45', '47', '48']) - sumCredit(lignes, ['491', '495', '496']))
+      + (sumDebit(lignes, ['53', '54', '51', '52', '55']) - sumCredit(lignes, ['59']));
+    setPassifN1({
+      capitalSocial: sumCredit(lignes, ['101']),
+      reserves: sumCredit(lignes, ['111', '112', '117', '118']),
+      resultatsReportes: sumCredit(lignes, ['121', '128']),
+      resultatExercice: Math.abs(totalActifN1Calc - autresPassifN1),
+      emprunts: sumCredit(lignes, ['16']),
+      autresPassifsFinanciers: sumCredit(lignes, ['18']),
+      provisions: sumCredit(lignes, ['15']),
+      fournisseurs: sumCredit(lignes, ['40']),
+      autresPassifsCourants: sumCredit(lignes, ['419', '422', '423', '425', '427', '428', '432', '433', '434', '435', '436', '437', '438', '441', '442', '447', '448', '453', '454', '457', '458', '46', '472', '48']),
+      concoursBancaires: sumCredit(lignes, ['501', '505', '506', '507', '508', '532', '537']),
+    });
+
     setBalanceN1(lignes);
     setBalanceN1Count(lignes.length);
   };
@@ -443,6 +491,16 @@ export default function EtatsFinanciers() {
     autresActifsCourants: 0,
     tresorerie: 0,
   });
+  const [actifN1, setActifN1] = useState({
+    immoIncorpBrut: 0, immoIncorpAmort: 0,
+    immoCorpBrut: 0, immoCorpAmort: 0,
+    immoFinancBrut: 0, immoFinancProv: 0,
+    autresActifsNonCourants: 0,
+    stocks: 0, stocksProv: 0,
+    clients: 0, clientsProv: 0,
+    autresActifsCourants: 0,
+    tresorerie: 0,
+  });
   const updateActif = (k: string, v: number) => setActif(prev => ({ ...prev, [k]: v }));
 
   const actifImmobNet = (actif.immoIncorpBrut - actif.immoIncorpAmort) + (actif.immoCorpBrut - actif.immoCorpAmort) + (actif.immoFinancBrut - actif.immoFinancProv);
@@ -452,8 +510,27 @@ export default function EtatsFinanciers() {
   const totalCourants = actifStocksNet + actifCreancesNet + actif.tresorerie;
   const totalActif = totalNonCourants + totalCourants;
 
+  const actifImmobNetN1 = (actifN1.immoIncorpBrut - actifN1.immoIncorpAmort) + (actifN1.immoCorpBrut - actifN1.immoCorpAmort) + (actifN1.immoFinancBrut - actifN1.immoFinancProv);
+  const actifStocksNetN1 = actifN1.stocks - actifN1.stocksProv;
+  const actifCreancesNetN1 = actifN1.clients - actifN1.clientsProv + actifN1.autresActifsCourants;
+  const totalNonCourantsN1 = actifImmobNetN1 + actifN1.autresActifsNonCourants;
+  const totalCourantsN1 = actifStocksNetN1 + actifCreancesNetN1 + actifN1.tresorerie;
+  const totalActifN1 = totalNonCourantsN1 + totalCourantsN1;
+
   // ===== PASSIF =====
   const [passif, setPassif] = useState({
+    capitalSocial: 0,
+    reserves: 0,
+    resultatsReportes: 0,
+    resultatExercice: 0,
+    emprunts: 0,
+    autresPassifsFinanciers: 0,
+    provisions: 0,
+    fournisseurs: 0,
+    autresPassifsCourants: 0,
+    concoursBancaires: 0,
+  });
+  const [passifN1, setPassifN1] = useState({
     capitalSocial: 0,
     reserves: 0,
     resultatsReportes: 0,
@@ -471,6 +548,11 @@ export default function EtatsFinanciers() {
   const totalPassifNonCourant = passif.emprunts + passif.autresPassifsFinanciers + passif.provisions;
   const totalPassifCourant = passif.fournisseurs + passif.autresPassifsCourants + passif.concoursBancaires;
   const totalPassif = totalCP + totalPassifNonCourant + totalPassifCourant;
+
+  const totalCPN1 = passifN1.capitalSocial + passifN1.reserves + passifN1.resultatsReportes + passifN1.resultatExercice;
+  const totalPassifNonCourantN1 = passifN1.emprunts + passifN1.autresPassifsFinanciers + passifN1.provisions;
+  const totalPassifCourantN1 = passifN1.fournisseurs + passifN1.autresPassifsCourants + passifN1.concoursBancaires;
+  const totalPassifN1 = totalCPN1 + totalPassifNonCourantN1 + totalPassifCourantN1;
 
   // ===== RESULTAT =====
   const [resultat, setResultat] = useState({
@@ -1051,39 +1133,39 @@ export default function EtatsFinanciers() {
     const headers = ['Compte', 'Libelle', `N (${anneeN})`, `N-1 (${annexeN1})`];
     const rows = isActif ? [
       { label: 'ACTIFS NON COURANTS', isSection: true, vals: ['', '', ''] },
-      { label: 'Immobilisations incorporelles (brut)', indent: 1, vals: [actif.immoIncorpBrut, ''] },
-      { label: 'Amortissements incorporels', indent: 2, vals: [-actif.immoIncorpAmort, ''] },
-      { label: 'Immobilisations corporelles (brut)', indent: 1, vals: [actif.immoCorpBrut, ''] },
-      { label: 'Amortissements corporels', indent: 2, vals: [-actif.immoCorpAmort, ''] },
-      { label: 'Autres actifs non courants', indent: 1, vals: [actif.autresActifsNonCourants, ''] },
-      { label: 'Total Actifs Non Courants', bold: true, vals: [totalNonCourants, ''] },
+      { label: 'Immobilisations incorporelles (brut)', indent: 1, vals: [actif.immoIncorpBrut, actifN1.immoIncorpBrut] },
+      { label: 'Amortissements incorporels', indent: 2, vals: [-actif.immoIncorpAmort, -actifN1.immoIncorpAmort] },
+      { label: 'Immobilisations corporelles (brut)', indent: 1, vals: [actif.immoCorpBrut, actifN1.immoCorpBrut] },
+      { label: 'Amortissements corporels', indent: 2, vals: [-actif.immoCorpAmort, -actifN1.immoCorpAmort] },
+      { label: 'Autres actifs non courants', indent: 1, vals: [actif.autresActifsNonCourants, actifN1.autresActifsNonCourants] },
+      { label: 'Total Actifs Non Courants', bold: true, vals: [totalNonCourants, totalNonCourantsN1] },
       { label: 'ACTIFS COURANTS', isSection: true, vals: ['', '', ''] },
-      { label: 'Stocks', indent: 1, vals: [actif.stocks, ''] },
-      { label: 'Provisions stocks', indent: 2, vals: [-actif.stocksProv, ''] },
-      { label: 'Clients et comptes rattaches', indent: 1, vals: [actif.clients, ''] },
-      { label: 'Provisions clients', indent: 2, vals: [-actif.clientsProv, ''] },
-      { label: 'Autres actifs courants', indent: 1, vals: [actif.autresActifsCourants, ''] },
-      { label: 'Tresorerie', indent: 1, vals: [actif.tresorerie, ''] },
-      { label: 'Total Actifs Courants', bold: true, vals: [totalCourants, ''] },
-      { label: 'TOTAL GENERAL ACTIF', bold: true, vals: [totalActif, ''] },
+      { label: 'Stocks', indent: 1, vals: [actif.stocks, actifN1.stocks] },
+      { label: 'Provisions stocks', indent: 2, vals: [-actif.stocksProv, -actifN1.stocksProv] },
+      { label: 'Clients et comptes rattaches', indent: 1, vals: [actif.clients, actifN1.clients] },
+      { label: 'Provisions clients', indent: 2, vals: [-actif.clientsProv, -actifN1.clientsProv] },
+      { label: 'Autres actifs courants', indent: 1, vals: [actif.autresActifsCourants, actifN1.autresActifsCourants] },
+      { label: 'Tresorerie', indent: 1, vals: [actif.tresorerie, actifN1.tresorerie] },
+      { label: 'Total Actifs Courants', bold: true, vals: [totalCourants, totalCourantsN1] },
+      { label: 'TOTAL GENERAL ACTIF', bold: true, vals: [totalActif, totalActifN1] },
     ] : [
       { label: 'CAPITAUX PROPRES', isSection: true, vals: ['', '', ''] },
-      { label: 'Capital social', indent: 1, vals: [passif.capitalSocial, ''] },
-      { label: 'Reserves', indent: 1, vals: [passif.reserves, ''] },
-      { label: 'Resultats reportes', indent: 1, vals: [passif.resultatsReportes, ''] },
-      { label: "Resultat de l'exercice", indent: 1, vals: [passif.resultatExercice, ''] },
-      { label: 'Total Capitaux Propres', bold: true, vals: [totalCP, ''] },
+      { label: 'Capital social', indent: 1, vals: [passif.capitalSocial, passifN1.capitalSocial] },
+      { label: 'Reserves', indent: 1, vals: [passif.reserves, passifN1.reserves] },
+      { label: 'Resultats reportes', indent: 1, vals: [passif.resultatsReportes, passifN1.resultatsReportes] },
+      { label: "Resultat de l'exercice", indent: 1, vals: [passif.resultatExercice, passifN1.resultatExercice] },
+      { label: 'Total Capitaux Propres', bold: true, vals: [totalCP, totalCPN1] },
       { label: 'PASSIFS NON COURANTS', isSection: true, vals: ['', '', ''] },
-      { label: 'Emprunts', indent: 1, vals: [passif.emprunts, ''] },
-      { label: 'Autres passifs financiers', indent: 1, vals: [passif.autresPassifsFinanciers, ''] },
-      { label: 'Provisions', indent: 1, vals: [passif.provisions, ''] },
-      { label: 'Total Passifs Non Courants', bold: true, vals: [totalPassifNonCourant, ''] },
+      { label: 'Emprunts', indent: 1, vals: [passif.emprunts, passifN1.emprunts] },
+      { label: 'Autres passifs financiers', indent: 1, vals: [passif.autresPassifsFinanciers, passifN1.autresPassifsFinanciers] },
+      { label: 'Provisions', indent: 1, vals: [passif.provisions, passifN1.provisions] },
+      { label: 'Total Passifs Non Courants', bold: true, vals: [totalPassifNonCourant, totalPassifNonCourantN1] },
       { label: 'PASSIFS COURANTS', isSection: true, vals: ['', '', ''] },
-      { label: 'Fournisseurs et comptes rattaches', indent: 1, vals: [passif.fournisseurs, ''] },
-      { label: 'Autres passifs courants', indent: 1, vals: [passif.autresPassifsCourants, ''] },
-      { label: 'Concours bancaires et autres passifs financiers', indent: 1, vals: [passif.concoursBancaires, ''] },
-      { label: 'Total Passifs Courants', bold: true, vals: [totalPassifCourant, ''] },
-      { label: 'TOTAL GENERAL PASSIF + CP', bold: true, vals: [totalPassif, ''] },
+      { label: 'Fournisseurs et comptes rattaches', indent: 1, vals: [passif.fournisseurs, passifN1.fournisseurs] },
+      { label: 'Autres passifs courants', indent: 1, vals: [passif.autresPassifsCourants, passifN1.autresPassifsCourants] },
+      { label: 'Concours bancaires et autres passifs financiers', indent: 1, vals: [passif.concoursBancaires, passifN1.concoursBancaires] },
+      { label: 'Total Passifs Courants', bold: true, vals: [totalPassifCourant, totalPassifCourantN1] },
+      { label: 'TOTAL GENERAL PASSIF + CP', bold: true, vals: [totalPassif, totalPassifN1] },
     ];
     return (
       <div className="space-y-4">
