@@ -531,6 +531,11 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         }
       }
 
+      // --- EF AI VERIFICATION ---
+      if (path === '/api/ef/verify' && method === 'POST') {
+        return handleEFVerify(request, env);
+      }
+
       // --- FIX TVA 19% ---
       const fixTvaMatch = path.match(/^\/api\/dossiers\/([^/]+)\/fix-tva$/);
       if (fixTvaMatch && method === 'POST') {
@@ -1503,4 +1508,116 @@ function generateFISCecritures(dmi: any, dossierId: string, societeId: string) {
   }
 
   return { entries, dmi };
+}
+
+// ===== EF AI VERIFICATION =====
+async function handleEFVerify(request: Request, env: Env): Promise<Response> {
+  const b = await request.json() as any;
+  const { actif, passif, resultat, sig, flux, immob, nomSociete, anneeN } = b;
+
+  // Build a comprehensive prompt for AI verification
+  const prompt = `Tu es un expert comptable tunisien. Vérifie ces états financiers PCG tunisien.
+
+Société: ${nomSociete || 'Non précisé'}
+Exercice: ${anneeN || 2025}
+
+=== BILAN ACTIF ===
+Immob incorporelles: VB=${actif?.immoIncorpBrut || 0}, Amort=${actif?.immoIncorpAmort || 0}
+Immob corporelles: VB=${actif?.immoCorpBrut || 0}, Amort=${actif?.immoCorpAmort || 0}
+Immob financières: VB=${actif?.immoFinancBrut || 0}, Prov=${actif?.immoFinancProv || 0}
+Autres actifs non courants: ${actif?.autresActifsNonCourants || 0}
+Stocks: ${actif?.stocks || 0}, Prov stocks: ${actif?.stocksProv || 0}
+Clients: ${actif?.clients || 0}, Prov clients: ${actif?.clientsProv || 0}
+Autres actifs courants: ${actif?.autresActifsCourants || 0}
+Trésorerie: ${actif?.tresorerie || 0}
+
+=== BILAN PASSIF ===
+Capital social: ${passif?.capitalSocial || 0}
+Réserves: ${passif?.reserves || 0}
+Résultats reportés: ${passif?.resultatsReportes || 0}
+Résultat exercice: ${passif?.resultatExercice || 0}
+Emprunts: ${passif?.emprunts || 0}
+Autres passifs financiers: ${passif?.autresPassifsFinanciers || 0}
+Provisions: ${passif?.provisions || 0}
+Fournisseurs: ${passif?.fournisseurs || 0}
+Autres passifs courants: ${passif?.autresPassifsCourants || 0}
+Concours bancaires: ${passif?.concoursBancaires || 0}
+
+=== ÉTAT DE RÉSULTAT ===
+Revenus: ${resultat?.revenus || 0}
+Autres produits exploitation: ${resultat?.autresProduitsExploit || 0}
+Achats consommés: ${resultat?.achatsConsommes || 0}
+Charges personnel: ${resultat?.chargesPersonnel || 0}
+Dotations amort: ${resultat?.dotationsAmort || 0}
+Autres charges exploitation: ${resultat?.autresChargesExploit || 0}
+Charges financières: ${resultat?.chargesFinancieres || 0}
+Produits placements: ${resultat?.produitsPlacements || 0}
+Autres gains ordinaires: ${resultat?.autresGainsOrdinaires || 0}
+Autres pertes ordinaires: ${resultat?.autresPertesOrdinaires || 0}
+Impôt bénéfices: ${resultat?.impotBenefices || 0}
+Éléments extraordinaires: ${resultat?.elementsExtraordinaires || 0}
+
+=== SIG ===
+Ventes marchandises: ${sig?.ventesMarchandises || 0}
+Coût achat marchandises: ${sig?.cAchatMarchandises || 0}
+Revenus: ${sig?.revenus || 0}
+Production stockée: ${sig?.productionStockee || 0}
+Achats consommés: ${sig?.achatsConsommes || 0}
+Autres charges externes: ${sig?.autresChargesExternes || 0}
+Impôts taxes: ${sig?.impotsTaxes || 0}
+Charges personnel: ${sig?.chargesPersonnel || 0}
+Charges financières: ${sig?.chargesFinancieres || 0}
+Dotations amort: ${sig?.dotationsAmortProvisions || 0}
+Impôt bénéfices: ${sig?.impotBenefices || 0}
+
+=== FLUX DE TRÉSORERIE ===
+Résultat net: ${flux?.resultatNet || 0}
+Dotations amort: ${flux?.dotationsProvisions || 0}
+Variation stocks: ${flux?.variationStocks || 0}
+Variation créances: ${flux?.variationCreances || 0}
+Variation autres actifs: ${flux?.variationAutresActifs || 0}
+Variation fournisseurs: ${flux?.variationFournisseurs || 0}
+Acquisitions immob: ${flux?.acqImmobilisations || 0}
+Encaissements emprunts: ${flux?.encaissementsEmprunts || 0}
+Remboursements emprunts: ${flux?.remboursementsEmprunts || 0}
+
+=== TABLEAU IMMOBILISATIONS ===
+${immob?.map((i: any) => `${i.cat}: VB=${i.vbN || 0}, Acq=${i.acq || 0}, Ces=${i.ces || 0}, Dot=${i.dot || 0}`).join('\n') || 'Non fourni'}
+
+Vérifie selon les règles PCG tunisien:
+1. ACTIF = PASSIF (équilibre bilan)
+2. Cohérence du résultat net entre tous les états
+3. SIG: Marge commerciale, VA, EBE correctement calculés
+4. Non-compensation entre actifs/passifs
+5. Classification courant/non-courant respectée
+6. Références croisées entre états
+7. Arrondis cohérents
+
+Réponds en JSON avec:
+- "ok": true/false
+- "errors": [{"field": "xxx", "message": "xxx", "severity": "error|warning"}]
+- "summary": "résumé en 2-3 lignes"
+- "suggestions": ["suggestion1", "suggestion2"]
+
+Réponds UNIQUEMENT en JSON valide, pas de texte avant/après.`;
+
+  try {
+    const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 2000,
+      temperature: 0.1,
+    });
+    const response = aiResponse?.response || aiResponse?.result?.response || JSON.stringify(aiResponse);
+    // Try to parse JSON from response
+    let parsed;
+    try {
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { ok: false, summary: response, errors: [], suggestions: [] };
+    } catch {
+      parsed = { ok: false, summary: response, errors: [], suggestions: [] };
+    }
+    return json({ ok: true, ...parsed });
+  } catch (e: any) {
+    return json({ error: 'AI error: ' + e.message }, 500);
+  }
 }

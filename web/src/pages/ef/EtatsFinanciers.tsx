@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
-import { ArrowLeft, Download, Copy, CheckCircle, Upload, FileSpreadsheet } from 'lucide-react';
+import { ArrowLeft, Download, Copy, CheckCircle, Upload, FileSpreadsheet, BrainCircuit } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { api } from '../../lib/api';
 
 type BalanceLigne = { compte: string; libelle: string; debit: number; credit: number; solde: number };
 
@@ -468,6 +469,26 @@ export default function EtatsFinanciers() {
   const resultatNetSIG = resultatAvantImpotSIG - sig.impotBenefices;
 
   const annexeN1 = anneeN - 1;
+
+  // ===== AI VERIFICATION =====
+  const [aiResult, setAiResult] = useState<any>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [showAiPanel, setShowAiPanel] = useState(false);
+
+  const handleVerifyAI = async () => {
+    setAiLoading(true);
+    setShowAiPanel(true);
+    try {
+      const result = await api.ef.verify({
+        actif, passif, resultat, sig, flux, immob, nomSociete, anneeN
+      });
+      setAiResult(result);
+    } catch (e: any) {
+      setAiResult({ ok: false, summary: 'Erreur: ' + e.message, errors: [], suggestions: [] });
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   // ===== EXPORT ACTIF XLSX =====
   const exportXLSX = async (sheetName: string, buildRows: () => any[][]) => {
@@ -1079,6 +1100,88 @@ export default function EtatsFinanciers() {
         </div>
       </div>
       {renderInputs()}
+      {/* AI Verification Button */}
+      {!selected && (
+        <div className="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <BrainCircuit className="text-purple-600" size={24} />
+              <div>
+                <h3 className="font-semibold text-gray-800">Vérification IA des États Financiers</h3>
+                <p className="text-xs text-gray-500">Analyse complète: bilan, résultat, SIG, cohérence PCG tunisien</p>
+              </div>
+            </div>
+            <button
+              onClick={handleVerifyAI}
+              disabled={aiLoading}
+              className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white px-5 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
+            >
+              {aiLoading ? (
+                <><span className="animate-spin">⏳</span> Analyse en cours...</>
+              ) : (
+                <><BrainCircuit size={16} /> Vérifier avec IA</>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+      {/* AI Results Panel */}
+      {showAiPanel && (
+        <div className="bg-white border rounded-lg p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-gray-800 flex items-center gap-2">
+              <BrainCircuit size={18} className="text-purple-600" />
+              Résultat Vérification IA
+            </h3>
+            <button onClick={() => setShowAiPanel(false)} className="text-gray-400 hover:text-gray-600 text-sm">✕ Fermer</button>
+          </div>
+          {aiLoading ? (
+            <div className="text-center py-8 text-gray-500">
+              <div className="animate-pulse text-2xl mb-2">🧠</div>
+              <div>Analyse en cours...</div>
+            </div>
+          ) : aiResult ? (
+            <div className="space-y-3">
+              {/* Status */}
+              <div className={`rounded-lg p-3 flex items-center gap-2 ${aiResult.ok ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                {aiResult.ok ? <CheckCircle className="text-green-600" size={18} /> : <span className="text-red-600">⚠️</span>}
+                <span className="font-medium">{aiResult.ok ? 'Vérification terminée' : 'Erreurs détectées'}</span>
+              </div>
+              {/* Summary */}
+              {aiResult.summary && (
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <div className="text-sm font-medium text-gray-700 mb-1">Résumé</div>
+                  <div className="text-sm text-gray-600">{aiResult.summary}</div>
+                </div>
+              )}
+              {/* Errors */}
+              {aiResult.errors?.length > 0 && (
+                <div className="space-y-1">
+                  <div className="text-sm font-medium text-red-700">Erreurs / Alertes</div>
+                  {aiResult.errors.map((err: any, i: number) => (
+                    <div key={i} className={`text-sm p-2 rounded ${err.severity === 'error' ? 'bg-red-50 text-red-700' : 'bg-yellow-50 text-yellow-700'}`}>
+                      <span className="font-mono text-xs">{err.field}</span>: {err.message}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Suggestions */}
+              {aiResult.suggestions?.length > 0 && (
+                <div className="space-y-1">
+                  <div className="text-sm font-medium text-blue-700">Suggestions</div>
+                  {aiResult.suggestions.map((s: string, i: number) => (
+                    <div key={i} className="text-sm p-2 bg-blue-50 text-blue-700 rounded">💡 {s}</div>
+                  ))}
+                </div>
+              )}
+              {/* Raw response fallback */}
+              {!aiResult.errors?.length && !aiResult.suggestions?.length && aiResult.response && (
+                <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-700 whitespace-pre-wrap">{aiResult.response}</div>
+              )}
+            </div>
+          ) : null}
+        </div>
+      )}
       {!selected ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {EF_TYPES.map(t => (

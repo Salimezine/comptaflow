@@ -98,4 +98,7 @@ export const api = {
     verifyAI: (did: string) => req<any>(`/scan/dossiers/${did}/verify-ai`, { method: 'POST', body: '{}' }),
     fixTVA: (did: string) => req<any>(`/scan/dossiers/${did}/fix-tva`, { method: 'POST', body: '{}' }),
   },
+  ef: {
+    verify: (data: any) => req<any>('/ef/verify', { method: 'POST', body: JSON.stringify(data) }),
+  },
 };
