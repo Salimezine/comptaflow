@@ -1552,19 +1552,20 @@ async function handleEFVerify(request: Request, env: Env): Promise<Response> {
 
   const prompt = `Expert comptable tunisien PCG. Verifie ces EF de "${nomSociete || '?'}" exercice ${anneeN || 2025}.
 
+TOUTES LES VALEURS SONT POSITIVES (en dinars).
 BILAN: Actif=${Math.round(actifTotal*1000)/1000}, Passif+CP=${Math.round(passifTotal*1000)/1000}, Ecart=${Math.round((actifTotal - passifTotal)*1000)/1000}
-PASSIF: Capital=${passif?.capitalSocial||0}, Reserves=${passif?.reserves||0}, ResReportes=${passif?.resultatsReportes||0}, ResExercice=${passif?.resultatExercice||0}, Emprunts=${passif?.emprunts||0}, Fournisseurs=${passif?.fournisseurs||0}
+PASSIF: Capital=${passif?.capitalSocial||0}, Reserves=${passif?.reserves||0}, ResReportes=${passif?.resultatsReportes||0}, ResExercice=${passif?.resultatExercice||0}
 RESULTAT: Produits=${totalProd}, Charges=${totalCharges}, ResExploit=${resExploit}, ChargesFinNettes=${chargesFinNettes}, ResNet=${resNet}
 SIG: VentesMarch=${Math.abs(sig?.ventesMarchandises||0)}, AchatsMarch=${Math.abs(sig?.cAchatMarchandises||0)}, MargeComm=${margeComm}, Revenus=${Math.abs(sig?.revenus||0)}, AchatsConsommes=${Math.abs(sig?.achatsConsommes||0)}, MargeBrute=${margeBrute}, VA=${VABrute}, EBE=${EBE}
 
-Regles PCG:
+Formules:
 1) Actif = Passif+CP (ecart ≈ 0, tolerance 1 dinar)
-2) ResExercice PASSIF ≈ ResNet RESULTAT (ecart normal si balance non fermee)
-3) MargeComm = VentesMarch - AchatsMarch
-4) MargeBrute = MargeComm + Revenus - AchatsConsommes
-5) Non-compensation: Produits et Charges restent separés, pas de compense
-6) Classification: immo 2x=non-courant, stocks 3x/clients 41/fournisseurs 40=courant
+2) MargeComm = VentesMarch - AchatsMarch
+3) MargeBrute = MargeComm + Revenus - AchatsConsommes
+4) Non-compensation: Produits et Charges restent separés
+5) Classification: immo 2x=non-courant, stocks 3x/clients 41/fournisseurs 40=courant
 
+IMPORTANT: Ne signale PAS d'erreur si les donnees ne sont pas complete (valeurs a 0). Signale UNIQUEMENT les incoherences dans les CALCULS fournis.
 Reponds JSON: {"ok":bool,"errors":[{"field":"x","message":"y","severity":"error|warning"}],"summary":"2-3 lignes","suggestions":["s1"]} UNIQUEMENT JSON.`;
 
   try {
