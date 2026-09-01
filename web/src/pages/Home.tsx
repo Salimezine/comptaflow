@@ -66,7 +66,7 @@ export default function Home() {
               </div>
               <div className="flex items-center gap-2">
                 <span className={`px-2 py-0.5 rounded text-xs bg-${color}-100 text-${color}-700`}>{label}</span>
-                <span className="text-xs text-gray-400">{d.raison_sociale || ''}</span>
+                {!isScan && <span className="text-xs text-gray-400">{d.raison_sociale || ''}</span>}
               </div>
             </Link>
           );
