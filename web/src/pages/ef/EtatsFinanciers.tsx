@@ -274,7 +274,7 @@ export default function EtatsFinanciers() {
     setSig({
       ventesMarchandises: prod(['707', '7097']),
       cAchatMarchandises: charge(['607', '6037']),
-      revenus: prod(['701', '702', '703', '704', '705', '706', '708', '709']) - prod(['707', '7097']),
+      revenus: prod(['701', '702', '703', '704', '705', '706', '708', '709']),
       productionStockee: prod(['71']),
       achatsConsommes: charge(['601', '602', '604', '605', '606', '6031', '6032']),
       subventionExploit: prod(['74']),
