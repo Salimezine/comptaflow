@@ -57,7 +57,7 @@ export default function Home() {
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <FolderOpen size={20} className={`text-${color}-500`} />
-                  <span className="font-medium">{isBaud ? 'BAUD' : isScan ? (d.nom || 'SCANFLASH') : (d.nom || 'Dossier')}</span>
+                  <span className="font-medium">{isBaud ? 'BAUD' : isScan ? 'SCANFLASH' : (d.nom || 'Dossier')}</span>
                 </div>
                 <button onClick={(e) => { e.preventDefault(); deleteDossier(d.id, d.type); }}
                   className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity">
