@@ -123,6 +123,7 @@ export default function EtatsFinanciers() {
   const [anneeN, setAnneeN] = useState(2025);
   const [showImport, setShowImport] = useState(false);
   const [balanceCount, setBalanceCount] = useState(0);
+  const [balanceN1Count, setBalanceN1Count] = useState(0);
   const [balanceN, setBalanceN] = useState<BalanceLigne[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const fileRefN1 = useRef<HTMLInputElement>(null);
@@ -218,14 +219,18 @@ export default function EtatsFinanciers() {
   const [balanceN1, setBalanceN1] = useState<BalanceLigne[]>([]);
 
   const applyBalanceN1 = (lignes: BalanceLigne[]) => {
+    if (lignes.length === 0) return;
+
+    const hasN = balanceN.length > 0;
+
     // Auto-fill Flux variations from N vs N-1
-    const stocksN = sumSoldeAbs(balanceN, ['31', '32', '33', '34', '35', '36', '37']);
+    const stocksN = hasN ? sumSoldeAbs(balanceN, ['31', '32', '33', '34', '35', '36', '37']) : actif.stocks;
     const stocksN1 = sumSoldeAbs(lignes, ['31', '32', '33', '34', '35', '36', '37']);
-    const clientsN = sumSoldeAbs(balanceN, ['41']);
+    const clientsN = hasN ? sumSoldeAbs(balanceN, ['41']) : actif.clients;
     const clientsN1 = sumSoldeAbs(lignes, ['41']);
-    const frsN = sumSoldeAbs(balanceN, ['40']);
+    const frsN = hasN ? sumSoldeAbs(balanceN, ['40']) : passif.fournisseurs;
     const frsN1 = sumSoldeAbs(lignes, ['40']);
-    const autresActifsN = sumSoldeAbs(balanceN, ['42', '43', '44', '45', '47']);
+    const autresActifsN = hasN ? sumSoldeAbs(balanceN, ['42', '43', '44', '45', '47']) : actif.autresActifsCourants;
     const autresActifsN1 = sumSoldeAbs(lignes, ['42', '43', '44', '45', '47']);
 
     // Dotations N-1
@@ -246,23 +251,24 @@ export default function EtatsFinanciers() {
     }));
 
     // Auto-fill Tab AMT from N vs N-1 (immo brut & amort)
-    const immoCorpBrutN = sumSoldeAbs(balanceN, ['22', '23', '24']);
+    const immoCorpBrutN = hasN ? sumSoldeAbs(balanceN, ['22', '23', '24']) : actif.immoCorpBrut;
     const immoCorpBrutN1 = sumSoldeAbs(lignes, ['22', '23', '24']);
-    const immoCorpAmortN = sumSoldeAbs(balanceN, ['282', '284', '292', '2932', '2938', '294']);
+    const immoCorpAmortN = hasN ? sumSoldeAbs(balanceN, ['282', '284', '292', '2932', '2938', '294']) : actif.immoCorpAmort;
     const immoCorpAmortN1 = sumSoldeAbs(lignes, ['282', '284', '292', '2932', '2938', '294']);
 
-    const immoIncorpBrutN = sumSoldeAbs(balanceN, ['21']);
+    const immoIncorpBrutN = hasN ? sumSoldeAbs(balanceN, ['21']) : actif.immoIncorpBrut;
     const immoIncorpBrutN1 = sumSoldeAbs(lignes, ['21']);
-    const immoIncorpAmortN = sumSoldeAbs(balanceN, ['281', '291', '2931']);
+    const immoIncorpAmortN = hasN ? sumSoldeAbs(balanceN, ['281', '291', '2931']) : actif.immoIncorpAmort;
     const immoIncorpAmortN1 = sumSoldeAbs(lignes, ['281', '291', '2931']);
 
     setImmob(prev => prev.map((l, i) => {
-      if (i === 0) return { ...l, vbN1: immoIncorpBrutN1, amortN1: immoIncorpAmortN1 }; // incorp
-      if (i === 2) return { ...l, vbN1: immoCorpBrutN1, amortN1: immoCorpAmortN1 }; // corp
+      if (i === 0) return { ...l, vbN1: immoIncorpBrutN1, amortN1: immoIncorpAmortN1 };
+      if (i === 2) return { ...l, vbN1: immoCorpBrutN1, amortN1: immoCorpAmortN1 };
       return l;
     }));
 
     setBalanceN1(lignes);
+    setBalanceN1Count(lignes.length);
   };
 
   const handleFileImportN1 = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -771,7 +777,12 @@ export default function EtatsFinanciers() {
         </button>
         {balanceCount > 0 && (
           <span className="text-xs text-green-600 flex items-center gap-1">
-            <CheckCircle size={14} /> {balanceCount} comptes importés
+            <CheckCircle size={14} /> N: {balanceCount} comptes
+          </span>
+        )}
+        {balanceN1Count > 0 && (
+          <span className="text-xs text-blue-600 flex items-center gap-1">
+            <CheckCircle size={14} /> N-1: {balanceN1Count} comptes
           </span>
         )}
       </div>
