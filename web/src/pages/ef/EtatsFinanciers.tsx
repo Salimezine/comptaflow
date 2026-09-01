@@ -1415,6 +1415,7 @@ export default function EtatsFinanciers() {
   };
 
   // ===== TAB AMT =====
+  const [amtLoading, setAmtLoading] = useState(false);
   const renderTabAmt = () => {
     const headers = ['Categorie', 'VB Ouverture', 'Acquisitions', 'Cessions', 'Dotations', 'Regul', 'VCN Fin'];
     const rows = immob.map(l => ({
@@ -1454,7 +1455,33 @@ export default function EtatsFinanciers() {
           }} disabled={balanceN.length === 0}
             className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-4 py-1.5 rounded text-sm flex items-center gap-2 font-medium">
             <RefreshCw size={14} />
-            Regénérer depuis la balance
+            Depuis la balance
+          </button>
+          <button onClick={async () => {
+            setAmtLoading(true);
+            try {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 90000);
+              const result = await api.ef.tabAmt({ balanceN, balanceN1, immob, nomSociete, anneeN }, controller.signal);
+              clearTimeout(timeout);
+              if (result.lignes?.length > 0) {
+                setImmob(result.lignes.map((l: any) => ({
+                  cat: l.cat || '',
+                  vbN: l.vbN || 0, acq: l.acq || 0, ces: l.ces || 0,
+                  dot: l.dot || 0, reg: l.reg || 0,
+                  vbN1: l.vbN1 || 0, amortN1: l.amortN1 || 0,
+                })));
+                setImmobCount(result.lignes.length);
+              }
+            } catch (e: any) {
+              alert('Erreur IA: ' + (e.message || e));
+            } finally {
+              setAmtLoading(false);
+            }
+          }} disabled={amtLoading || balanceN.length === 0}
+            className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-4 py-1.5 rounded text-sm flex items-center gap-2 font-medium">
+            {amtLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            {amtLoading ? 'IA en cours...' : 'Améliorer avec IA'}
           </button>
           {immobCount > 0 && (
             <span className="text-xs text-purple-600 flex items-center gap-1">

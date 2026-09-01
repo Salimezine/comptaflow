@@ -1635,30 +1635,32 @@ async function handleEFTabAmt(request: Request, env: Env): Promise<Response> {
     };
   });
 
-  const prompt = `Expert comptable tunisien PCG. Genere le TABLEAU DE VARIATION DES IMMOBILISATIONS ET DES AMORTISSEMENTS pour "${nomSociete || '?'}" exercice ${anneeN || 2025}.
+  const prompt = `Tu es un expert comptable tunisien PCG. Genere le TABLEAU DES IMMOBILISATIONS ET AMORTISSEMENTS pour "${nomSociete || '?'}" exercice ${anneeN || 2025}.
 
-IMMO INCORPORELLES N:
-${immoIncorpDetail.length > 0 ? immoIncorpDetail.map((l: any) => `  ${l.code} ${l.libelle}: VB_N=${l.vbN}, Amort_N=${l.amortN}, VB_N1=${l.vbN1}, Amort_N1=${l.amortN1}`).join('\n') : '  Aucune'}
+DONNEES EXACTES DE LA BALANCE (applique les regles PCG):
+${immoIncorpDetail.length > 0 ? immoIncorpDetail.map((l: any) => `Compte ${l.code} "${l.libelle}": VBouverture_N1=${l.vbN1}, Amort_N1=${l.amortN1}, VBcloture_N=${l.vbN}, Amort_N=${l.amortN}`).join('\n') : 'Aucune immo incorporelle'}
+${immoDetail.length > 0 ? immoDetail.map((l: any) => `Compte ${l.code} "${l.libelle}": VBouverture_N1=${l.vbN1}, Amort_N1=${l.amortN1}, VBcloture_N=${l.vbN}, Amort_N=${l.amortN}`).join('\n') : 'Aucune immo corporelle'}
+${(balanceN || []).filter((l: any) => l.compte?.startsWith('25') && Math.abs(l.solde || 0) > 0).map((l: any) => `Compte ${l.compte} "${l.libelle}": VBcloture_N=${Math.abs(l.solde)}`).join('\n') || 'Aucune immo financiere'}
 
-IMMO CORPORELLES N (22x):
-${immoDetail.length > 0 ? immoDetail.map((l: any) => `  ${l.code} ${l.libelle}: VB_N=${l.vbN}, Amort_N=${l.amortN}, VB_N1=${l.vbN1}, Amort_N1=${l.amortN1}`).join('\n') : '  Aucune'}
-
-IMMO FINANCIERES N (25x):
-${(balanceN || []).filter((l: any) => l.compte?.startsWith('25') && Math.abs(l.solde || 0) > 0).map((l: any) => `  ${l.compte} ${l.libelle}: VB_N=${Math.abs(l.solde)}`).join('\n') || '  Aucune'}
-
-Regles PCG:
-- VB_N = VB_N1 + Acquisitions - Cessions
-- Amort_N = Amort_N1 + Dotations - Regul
+REGLES PCG ( applique exactement):
+- VB_N (cloture) = valeur brute a la fin de l'exercice (compte 22x debit)
+- VB_N1 (ouverture) = valeur brute N-1 (compte 22x N-1)
+- Amort_N (cloture) = amortissements cumules fin N (compte 28x credit)
+- Amort_N1 (ouverture) = amortissements cumules N-1 (compte 28x N-1)
+- Acquisitions = VB_N - VB_N1 + Cessions (si pas de cessions, acq = VB_N - VB_N1)
+- Dotations = Amort_N - Amort_N1 + Regul (si pas de regul, dot = Amort_N - Amort_N1)
 - VCN = VB_N - Amort_N
-- Les immobilisations incorporelles (21x) sont non amortissables sauf fonds commercial
-- Les dotations viennent du compte 681x dans la balance
+- Les immobilisations incorporelles (21x): vbN1, amortN1, vbN, amortN viennent des comptes 21x et 281x
+- Les immobilisations corporelles (22x): vbN1, amortN1, vbN, amortN viennent des comptes 22x et 282x/284x/292x/293x/294x
+- Les immobilisations financieres (25x-26x): vbN des comptes 25x/26x, amort des 295x/296x/297x
 
-Genere un JSON UNIQUEMENT. Pas de texte, pas de code, pas d'explication. JUSTE LE JSON.
-Format exact: {"lignes":[{"cat":"nom","vbN":0,"acq":0,"ces":0,"dot":0,"reg":0,"vbN1":0,"amortN1":0}],"summary":"1-2 lignes"}
-Chaque ligne = 1 compte 22x. Ajoute des lignes totaux (Incorp, Corp, Financ, GRAND TOTAL).
-acq = VB_N - VB_N1 + Ces, dot = Amort_N - Amort_N1 + Reg.
-Si pas de data N-1, mets vbN1=0, amortN1=0.
-IMPORTANT: Reponds UNIQUEMENT avec le JSON, rien d'autre.`;
+IMPORTANT: Utilise les MONTANTS EXACTS donnes ci-dessus. Ne calcule pas, ne cherche pas, ne guess pas. Copie les valeurs exactes de la balance.
+
+Reponds UNIQUEMENT en JSON. Format:
+{"lignes":[{"cat":"nom du compte","vbN":montant,"acq":0,"ces":0,"dot":0,"reg":0,"vbN1":montant,"amortN1":montant}],"summary":"description"}
+Chaque ligne = 1 compte 22x individuel. Ajoute les lignes totaux: "Immobilisations incorporelles", "Immobilisations corporelles (total)", "Immobilisations financieres", "GRAND TOTAL".
+Pour les totaux: somme les lignes individuelles.
+Reponds UNIQUEMENT avec le JSON, rien d'autre.`;
 
   try {
     const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
