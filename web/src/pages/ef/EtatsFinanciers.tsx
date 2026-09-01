@@ -287,6 +287,26 @@ export default function EtatsFinanciers() {
       impotBenefices: sumSolde(lignes, ['691', '697']),
     });
     setBalanceCount(lignes.length);
+    // ===== TAB AMT AUTO-FILL from balance =====
+    const findAmort = (code: string) => {
+      const trySwap = code.slice(0, 2) === '22' ? '28' + code.slice(2) : '';
+      const match = trySwap ? lignes.find(l => l.compte === trySwap) : null;
+      return match ? Math.abs(match.solde) : 0;
+    };
+    const immoCorpAccounts = lignes.filter(l => l.compte.startsWith('22') && Math.abs(l.solde) > 0);
+    const immoLines: LigneImob[] = [];
+    for (const acc of immoCorpAccounts) {
+      const name = acc.libelle || acc.compte;
+      const amort = findAmort(acc.compte);
+      immoLines.push({ cat: name, vbN: Math.abs(acc.solde), acq: 0, ces: 0, dot: amort, reg: 0, vbN1: 0, amortN1: 0 });
+    }
+    if (immoLines.length > 0) {
+      immoLines.push({ cat: 'Immobilisations incorporelles', vbN: sumDebit(lignes, ['21']), acq: 0, ces: 0, dot: sumCredit(lignes, ['281', '291']), reg: 0, vbN1: 0, amortN1: 0 });
+      immoLines.push({ cat: 'Immobilisations corporelles (total)', vbN: sumDebit(lignes, ['22', '23', '24']), acq: 0, ces: 0, dot: sumCredit(lignes, ['282', '284', '292']), reg: 0, vbN1: 0, amortN1: 0 });
+      immoLines.push({ cat: 'Immobilisations financières', vbN: sumDebit(lignes, ['25', '26']), acq: 0, ces: 0, dot: sumCredit(lignes, ['295', '296', '297']), reg: 0, vbN1: 0, amortN1: 0 });
+      setImmob(immoLines);
+      setImmobCount(immoLines.length);
+    }
   };
 
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -351,9 +371,26 @@ export default function EtatsFinanciers() {
     const immoIncorpAmortN = hasN ? sumSoldeAbs(balanceN, ['281', '291', '2931']) : actif.immoIncorpAmort;
     const immoIncorpAmortN1 = sumSoldeAbs(lignes, ['281', '291', '2931']);
 
+    // Also fill N-1 for individual 22x immo lines
+    const findAmortN1 = (immoCode: string) => {
+      const trySwap = immoCode.slice(0, 2) === '22' ? '28' + immoCode.slice(2) : '';
+      const match = trySwap ? lignes.find(l => l.compte === trySwap) : null;
+      return match ? Math.abs(match.solde) : 0;
+    };
     setImmob(prev => prev.map((l, i) => {
-      if (i === 0) return { ...l, vbN1: immoIncorpBrutN1, amortN1: immoIncorpAmortN1 };
-      if (i === 2) return { ...l, vbN1: immoCorpBrutN1, amortN1: immoCorpAmortN1 };
+      // Last 3 lines are summary (immo incorp, corp total, financ)
+      if (i === prev.length - 3) return { ...l, vbN1: immoIncorpBrutN1, amortN1: immoIncorpAmortN1 };
+      if (i === prev.length - 2) return { ...l, vbN1: immoCorpBrutN1, amortN1: immoCorpAmortN1 };
+      if (i === prev.length - 1) {
+        const immoFinancBrutN1 = sumSoldeAbs(lignes, ['25', '26']);
+        const immoFinancAmortN1 = sumCredit(lignes, ['295', '296', '297']);
+        return { ...l, vbN1: immoFinancBrutN1, amortN1: immoFinancAmortN1 };
+      }
+      // Dynamic individual 22x lines
+      const acc = balanceN.find(a => l.cat === (a.libelle || a.compte));
+      if (acc && acc.compte.startsWith('22')) {
+        return { ...l, vbN1: Math.abs(acc.solde), amortN1: findAmortN1(acc.compte) };
+      }
       return l;
     }));
 
