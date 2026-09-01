@@ -70,7 +70,7 @@ function wStr(ws: ExcelJS.Worksheet, r: number, c: number, val: string) {
 }
 
 export async function buildEFExcel(vals: EFValues): Promise<ArrayBuffer> {
-  const resp = await fetch('/ef-template.xlsx');
+  const resp = await fetch(`${import.meta.env.BASE_URL}ef-template.xlsx`);
   const buf = await resp.arrayBuffer();
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf);
