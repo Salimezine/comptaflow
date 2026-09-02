@@ -11,44 +11,50 @@ async function loadXLSX() {
   return XLSXModule;
 }
 
-function parseInvoice(text: string) {
+function parseInvoice(rawText: string) {
+  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+
   let numero = '';
-  let m = text.match(/FACTURE\s*N[°o]?\s*:\s*(\d{4})\s*\/\s*(\d+)/);
-  if (m) numero = m[1] + '/' + m[2];
-
   let date = '';
-  m = text.match(/LE\s*:\s*(\d{2})\/(\d{2})\/(\d{4})/);
-  if (m) date = m[3] + '-' + m[2] + '-' + m[1];
-
   let client = '';
-  m = text.match(/(?<!Code )Client\s*:\s*(.+?)(?:\n|$)/);
-  if (m) {
-    const c = m[1].trim();
-    client = c.toUpperCase().includes('PASSAGERS') ? 'CLIENTS PASSAGERS' : c;
-  }
-
   let ht0 = 0, ht19 = 0, tva19 = 0, ttc = 0, timbre = 1.0;
-  const lines = text.split('\n');
+  const p = (s: string) => { try { return parseFloat(s.replace(/ /g, '').replace(',', '.')); } catch { return 0; } };
 
   for (const line of lines) {
-    if (ht0 === 0) {
-      m = line.match(/^([\d][\d ,.]+?)\s+0%\s/);
-      if (m) { try { ht0 = parseFloat(m[1].trim().replace(/ /g, '').replace(',', '.')); } catch {} }
+    if (!numero) {
+      const m = line.match(/FACTURE\s*N[°o]?\s*:\s*(\d{4})\s*\/\s*(\d+)/);
+      if (m) numero = m[1] + '/' + m[2];
     }
-    if (ht19 === 0) {
-      m = line.match(/^([\d][\d ,.]+?)\s+19%\s+([\d ,.]+)/);
+    if (!date) {
+      const m = line.match(/LE\s*:?\s*(\d{2})\/(\d{2})\/(\d{4})/);
+      if (m) date = m[3] + '-' + m[2] + '-' + m[1];
+    }
+    if (!client) {
+      const m = line.match(/(?<!Code\s)Client\s*:\s*(.+?)(?:\s+Adresse|\s+FACTURE|\s+Mat\.)/);
       if (m) {
-        try { ht19 = parseFloat(m[1].trim().replace(/ /g, '').replace(',', '.')); } catch {}
-        try { tva19 = parseFloat(m[2].trim().replace(/ /g, '').replace(',', '.')); } catch {}
+        const c = m[1].trim();
+        client = c.toUpperCase().includes('PASSAGERS') ? 'CLIENTS PASSAGERS' : c;
       }
     }
-    if (timbre === 1.0) {
-      m = line.match(/TIMBRE\s+FIS\.\s*:\s*([\d ,.]+)/);
-      if (m) { try { timbre = parseFloat(m[1].trim().replace(/ /g, '').replace(',', '.')); } catch {} }
+    // HT 0%: "AMOUNT  0%  NET H.TVA  :  TOTAL"
+    if (!ht0) {
+      const m = line.match(/([\d][\d ]*,\d+)\s+0%\s+NET\s+H\.TVA\s*:\s*([\d ][\d ]*,\d+)/);
+      if (m) { ht0 = p(m[1]); }
     }
-    if (ttc === 0) {
-      m = line.match(/NET\s+T\.T\.C\.\s*([\d ,.]+)/);
-      if (m) { try { ttc = parseFloat(m[1].trim().replace(/ /g, '').replace(',', '.')); } catch {} }
+    // HT 19%: "AMOUNT  19%  TVA_AMOUNT"
+    if (!ht19) {
+      const m = line.match(/([\d][\d ]*,\d+)\s+19%\s+([\d ]*,\d+)/);
+      if (m) { ht19 = p(m[1]); tva19 = p(m[2]); }
+    }
+    // Timbre
+    if (timbre === 1.0) {
+      const m = line.match(/TIMBRE\s+FIS\.?\s*:\s*([\d ]*,\d+)/);
+      if (m) timbre = p(m[1]);
+    }
+    // TTC
+    if (!ttc) {
+      const m = line.match(/NET\s+T\.T\.C\.?\s+([\d ]*,\d+)/);
+      if (m) ttc = p(m[1]);
     }
   }
 
