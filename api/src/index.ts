@@ -874,6 +874,72 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         }
       }
 
+      // --- BAUD: AI VERIFICATION ---
+      const baudAiMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)\/verify-ai$/);
+      if (baudAiMatch && method === 'POST') {
+        const did = baudAiMatch[1];
+        try {
+          const dossier = await env.DB.prepare('SELECT * FROM dossiers_paie WHERE id = ?').bind(did).first() as any;
+          if (!dossier) return json({ error: 'Dossier non trouve' }, 404);
+
+          const b = await request.json() as any;
+          const { employees, pointage, salaryResults } = b;
+
+          // Build summary for AI
+          const empSummary = employees.map((emp: any) => {
+            const r = salaryResults?.[emp.matricule];
+            return `${emp.matricule} ${emp.nom} ${emp.prenom} | SF:${emp.situation_fam} NE:${emp.nombre_enfants} | Brut:${emp.salaire_brut} NouvBrut:${emp.nouveau_salaire_brut} | ${emp.type_contrat} ${emp.fonction} | CNSS:${r?.cnss_salariale||0} IRPP:${r?.irpp||0} Net:${r?.net_a_payer||0}`;
+          }).join('\n');
+
+          const ptgSummary = pointage?.map((p: any) => `${p.matricule} ${p.nom}: Abs=${p.absences} Av=${p.avances} CP=${p.conges_payes} HS=${p.heures_supplementaires}`).join('\n') || 'Aucun pointage';
+
+          const prompt = `Tu es un expert comptable specialise en paie tunisienne. Verifie cette liste de salaries pour le mois ${dossier.mois}/${dossier.annee}.
+
+SALARIES (${employees.length}):
+${empSummary}
+
+POINTAGE:
+${ptgSummary}
+
+VERIFICATIONS REQUISES:
+1. Tous les salaries sont-ils calcules? (Y a-t-il des manquants?)
+2. Les calculs CNSS (9.68%), IRPP (bareme 8 tranches), CSS (0.5%) sont-ils corrects?
+3. Y a-t-il des salaries avec Brut different du mois precedent (nouveau_salaire_brut vs salaire_brut)?
+4. Les situations familiales et nombre d'enfants semblent-ils coherents?
+5. Y a-t-il des anomalies (salaire tres bas/eleve, absences excessives, etc.)?
+
+Reponds en JSON:
+{
+  "ok": boolean,
+  "verdict": "OK" | "ATTENTION" | "ERREUR",
+  "checks": [
+    { "name": "string", "status": "ok" | "warning" | "error", "detail": "string" }
+  ],
+  "missing": ["matricule des salaries non calcules"],
+  "changes": ["modifications detectees par rapport au mois precedent"],
+  "anomalies": ["anomalies detectees"]
+}`;
+
+          const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 1024,
+          });
+
+          const responseText = (aiResponse as any)?.response || '';
+          let result;
+          try {
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            result = jsonMatch ? JSON.parse(jsonMatch[0]) : { ok: false, verdict: 'ERREUR', checks: [], error: 'Reponse IA non parseable' };
+          } catch {
+            result = { ok: false, verdict: 'ERREUR', checks: [], error: 'Erreur parsing IA', raw: responseText };
+          }
+
+          return json(result);
+        } catch (e: any) {
+          return json({ error: 'Verification IA echouee: ' + (e.message || e) }, 500);
+        }
+      }
+
       // --- BAUD: LIGNES ---
       const baudLignesMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)\/lignes$/);
       if (baudLignesMatch && method === 'GET') {

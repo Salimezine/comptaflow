@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Upload, Download, CheckCircle, FileSpreadsheet, Calculator, Users } from 'lucide-react';
+import { ArrowLeft, Upload, Download, CheckCircle, FileSpreadsheet, Calculator, Users, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { api } from '../../lib/api';
 import { parseFichePersonnel, Employee, PointageData } from '../../lib/baudParser';
 import { calculateSalary, SalaryResult } from '../../lib/baudCalculator';
 import * as XLSX from 'xlsx';
 
-type Tab = 'navette' | 'employees' | 'calcul' | 'export';
+type Tab = 'navette' | 'employees' | 'controle' | 'calcul' | 'export';
 
 export default function BaudDossierPage() {
   const { id } = useParams<{ id: string }>();
@@ -18,6 +18,8 @@ export default function BaudDossierPage() {
   const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<any>(null);
 
   // Parsed data
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -101,11 +103,17 @@ export default function BaudDossierPage() {
     for (const emp of employees) {
       // Find pointage data for this employee
       const ptg = pointage.find(p => p.matricule === emp.matricule || p.nom === emp.nom);
-      const absences = ptg?.absences ? parseInt(ptg.absences) || 0 : 0;
+      const absencesStr = ptg?.absences || '';
+      const absences = parseInt(absencesStr) || 0;
       const avances = ptg?.avances || 0;
 
       // Use nouveau_salaire_brut if available, otherwise salaire_brut
-      const brut = emp.nouveau_salaire_brut > 0 ? emp.nouveau_salaire_brut : emp.salaire_brut;
+      let brut = emp.nouveau_salaire_brut > 0 ? emp.nouveau_salaire_brut : emp.salaire_brut;
+
+      // Prorata if absences (22 working days/month)
+      if (absences > 0) {
+        brut = Math.round(brut * (22 - absences) / 22 * 1000) / 1000;
+      }
 
       const result = calculateSalary({
         salaire_brut: brut,
@@ -123,12 +131,12 @@ export default function BaudDossierPage() {
   };
 
   const generateSageExport = async () => {
-    if (!dossier || salaryResults.size === 0) return;
+    if (!dossier || salaryResults.size === 0) { setMsg('Calculez d\'abord les salaires'); return; }
     setGenerating(true); setMsg('');
     try {
       // Build XLSX for Sage Paie 100 import
       const salRows: any[][] = [['Matricule', 'Nom', 'Prenom', 'Civilité', 'Date de naissance', 'Date d\'embauche', 'Poste', 'Type de contrat', 'Situation familiale', 'Nombre enfants', 'CNSS', 'RIB', 'Salaire base']];
-      const varRows: any[][] = [['Matricule', 'Rubrique', 'Zone', 'Valeur']];
+      const varRows: any[][] = [['Matricule', 'Rubrique ou Constante', 'Zone', 'Valeur']];
 
       for (const emp of employees) {
         const result = salaryResults.get(emp.matricule);
@@ -147,9 +155,27 @@ export default function BaudDossierPage() {
         if (result.cnss_salariale > 0) varRows.push([emp.matricule, 'CSSAL', '3', result.cnss_salariale]);
         if (result.irpp > 0) varRows.push([emp.matricule, 'IRPP', '3', result.irpp]);
         if (result.css_salariale > 0) varRows.push([emp.matricule, 'CSS', '3', result.css_salariale]);
+
+        // Pointage data
+        const ptg = pointage.find(p => p.matricule === emp.matricule || p.nom === emp.nom);
+        if (ptg) {
+          if (ptg.avances > 0) varRows.push([emp.matricule, 'AVANCE', '3', ptg.avances]);
+          if (ptg.absences) {
+            const absJours = parseInt(ptg.absences) || 0;
+            if (absJours > 0) varRows.push([emp.matricule, 'ABSENCE', '0', absJours]);
+          }
+          if (ptg.conges_payes) {
+            const cpJours = parseInt(ptg.conges_payes) || 0;
+            if (cpJours > 0) varRows.push([emp.matricule, 'CP', '0', cpJours]);
+          }
+          if (ptg.heures_supplementaires) {
+            const hs = parseFloat(ptg.heures_supplementaires) || 0;
+            if (hs > 0) varRows.push([emp.matricule, 'HSUP', '0', hs]);
+          }
+        }
       }
 
-      // Generate XLSX
+      // Generate and download XLSX directly
       const moisStr = String(dossier.mois).padStart(2, '0');
       const annStr = String(dossier.annee).slice(-2);
 
@@ -161,14 +187,21 @@ export default function BaudDossierPage() {
       XLSX.utils.book_append_sheet(varWb, XLSX.utils.aoa_to_sheet(varRows), 'Variables');
       const varB64 = XLSX.write(varWb, { type: 'base64', bookType: 'xlsx' });
 
-      // Store via API
-      const salName = `ImportSalaries_${moisStr}-${annStr}.xlsx`;
-      const varName = `ImportVariables_${moisStr}-${annStr}.xlsx`;
+      // Download both files
+      const downloadB64 = (b64: string, filename: string) => {
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+      };
 
-      // Use existing export endpoint
-      const res = await api.baud.exportGA(dossier.id);
-      setMsg(`Fichiers generes: ${res.exports.map((e: any) => `${e.type} (${e.nb_lignes})`).join(', ')}`);
-      await load();
+      downloadB64(salB64, `ImportSalaries_${moisStr}-${annStr}.xlsx`);
+      setTimeout(() => downloadB64(varB64, `ImportVariables_${moisStr}-${annStr}.xlsx`), 500);
+
+      setMsg(`${salRows.length - 1} salaries + ${varRows.length - 1} variables exportes`);
     } catch (e: any) { setMsg('Erreur: ' + e.message); }
     setGenerating(false);
   };
@@ -182,11 +215,31 @@ export default function BaudDossierPage() {
     } catch (e: any) { setMsg(e.message); }
   };
 
+  const handleVerifyAI = async () => {
+    if (!dossier || employees.length === 0) return;
+    setVerifying(true); setVerifyResult(null);
+    try {
+      const salaryObj: Record<string, SalaryResult> = {};
+      salaryResults.forEach((v, k) => { salaryObj[k] = v; });
+
+      const BASE = import.meta.env.VITE_API_URL || 'https://eurex-api.ezzinesalim21.workers.dev/api';
+      const res = await fetch(`${BASE}/baud/dossiers/${dossier.id}/verify-ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employees, pointage, salaryResults: salaryObj }),
+      });
+      const data = await res.json();
+      setVerifyResult(data);
+    } catch (e: any) { setVerifyResult({ verdict: 'ERREUR', error: e.message }); }
+    setVerifying(false);
+  };
+
   if (!dossier) return <div className="mt-8 text-gray-400 text-sm">Chargement...</div>;
 
   const tabs = [
     { key: 'navette', label: 'Import', icon: Upload },
     { key: 'employees', label: `Salaries (${employees.length})`, icon: Users },
+    { key: 'controle', label: `Controle IA`, icon: ShieldCheck },
     { key: 'calcul', label: `Calcul (${salaryResults.size})`, icon: Calculator },
     { key: 'export', label: `Export Sage (${exports.length})`, icon: FileSpreadsheet },
   ] as const;
@@ -281,6 +334,75 @@ export default function BaudDossierPage() {
             </>
           ) : (
             <p className="text-sm text-gray-400">Aucun salary. Uploadez d'abord un fichier "Liste du personnel".</p>
+          )}
+        </div>
+      )}
+
+      {/* TAB: CONTROLE IA */}
+      {tab === 'controle' && (
+        <div className="space-y-4">
+          <div className="bg-white border rounded-lg p-4 space-y-3">
+            <div className="flex items-center gap-3">
+              <ShieldCheck size={20} className="text-blue-600" />
+              <div>
+                <h3 className="font-medium text-sm">Verification IA</h3>
+                <p className="text-xs text-gray-400">Verifie les calculs, detecte les anomalies et les salaries manquants</p>
+              </div>
+              <button onClick={handleVerifyAI} disabled={verifying || employees.length === 0}
+                className="ml-auto px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1">
+                <ShieldCheck size={14} />{verifying ? 'Verification...' : 'Verifier avec IA'}
+              </button>
+            </div>
+          </div>
+
+          {verifyResult && !verifyResult.error && (
+            <div className={`rounded-lg border p-4 ${verifyResult.verdict === 'OK' ? 'bg-green-50 border-green-200' : verifyResult.verdict === 'ATTENTION' ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'}`}>
+              <div className="flex items-center gap-2 mb-2">
+                {verifyResult.verdict === 'OK' ? <CheckCircle size={18} className="text-green-600" /> : <AlertTriangle size={18} className={verifyResult.verdict === 'ATTENTION' ? 'text-amber-600' : 'text-red-600'} />}
+                <span className={`font-semibold ${verifyResult.verdict === 'OK' ? 'text-green-700' : verifyResult.verdict === 'ATTENTION' ? 'text-amber-700' : 'text-red-700'}`}>
+                  {verifyResult.verdict}
+                </span>
+              </div>
+
+              {verifyResult.checks?.length > 0 && (
+                <div className="space-y-1 mb-3">
+                  {verifyResult.checks.map((c: any, i: number) => (
+                    <div key={i} className={`flex items-start gap-2 text-xs ${c.status === 'error' ? 'text-red-600' : c.status === 'warning' ? 'text-amber-600' : 'text-green-600'}`}>
+                      <span>{c.status === 'ok' ? '✓' : c.status === 'warning' ? '⚠' : '✗'}</span>
+                      <span><strong>{c.name}:</strong> {c.detail}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {verifyResult.missing?.length > 0 && (
+                <div className="text-xs text-red-600 mb-2">
+                  <strong>Salaries manquants:</strong> {verifyResult.missing.join(', ')}
+                </div>
+              )}
+
+              {verifyResult.changes?.length > 0 && (
+                <div className="text-xs text-amber-600 mb-2">
+                  <strong>Modifications:</strong>
+                  <ul className="list-disc list-inside">{verifyResult.changes.map((c: string, i: number) => <li key={i}>{c}</li>)}</ul>
+                </div>
+              )}
+
+              {verifyResult.anomalies?.length > 0 && (
+                <div className="text-xs text-red-600 mb-2">
+                  <strong>Anomalies:</strong>
+                  <ul className="list-disc list-inside">{verifyResult.anomalies.map((a: string, i: number) => <li key={i}>{a}</li>)}</ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {verifyResult?.error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-600">{verifyResult.error}</div>
+          )}
+
+          {employees.length > 0 && salaryResults.size === 0 && (
+            <p className="text-sm text-amber-600">Calculez d'abord les salaries (onglet Salaries) avant de verifier.</p>
           )}
         </div>
       )}
