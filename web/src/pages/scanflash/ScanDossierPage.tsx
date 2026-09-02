@@ -228,7 +228,7 @@ export default function ScanDossierPage() {
   };
 
   const handleExportCSV = async () => {
-    if (localEcritures.length === 0) return;
+    if (localEcritures.length === 0) { alert('Aucune écriture à exporter. Générer d\'abord le VT.'); return; }
     const lines: string[] = [];
     for (const e of localEcritures) {
       const date = e.date_operation;
@@ -247,8 +247,9 @@ export default function ScanDossierPage() {
   };
 
   const handleExportXLSX = async () => {
-    if (localEcritures.length === 0) return;
-    const XLSXMod = await import('xlsx');
+    if (localEcritures.length === 0) { alert('Aucune écriture à exporter. Générer d\'abord le VT.'); return; }
+    const XLSXMod = await import('xlsx').catch(() => null);
+    if (!XLSXMod) { alert('Erreur chargement bibliothèque XLSX.'); return; }
     const XLSX = XLSXMod.default || XLSXMod;
     const header = ['N° pièce comptable', 'Date pièce comptable', 'Journal', 'Libellé', 'N° compte', 'Libellé trésorerie', 'Débit', 'Crédit'];
     const rows: any[][] = [header];
@@ -503,6 +504,9 @@ export default function ScanDossierPage() {
             <button onClick={() => handleExportCSV()} className="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm hover:bg-emerald-700">
               <Download size={14} className="inline mr-1" /> Export CSV VT
             </button>
+            <button onClick={handleExportXLSX} className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700">
+              <Download size={14} className="inline mr-1" /> Export XLSX VT
+            </button>
             {localEcritures.length > 0 && (
               <button onClick={() => handleDeleteEcritures()} className="text-red-400 hover:text-red-600 text-sm border border-red-200 px-3 py-1.5 rounded">
                 <Trash2 size={14} className="inline mr-1" /> Vider ecritures
@@ -584,10 +588,10 @@ export default function ScanDossierPage() {
             <h3 className="font-semibold text-gray-700">Export CSV / Axeane</h3>
             <p className="text-sm text-gray-500">Format: N° piece | Date | Journal | Libelle | Compte | Libelle tresorerie | Debit | Credit</p>
             <div className="flex gap-3 items-center flex-wrap">
-              <button onClick={() => handleExportCSV()} className="bg-emerald-600 text-white px-4 py-2 rounded text-sm hover:bg-emerald-700">
+              <button onClick={() => handleExportCSV()} disabled={localEcritures.length === 0} className="bg-emerald-600 text-white px-4 py-2 rounded text-sm hover:bg-emerald-700 disabled:opacity-50">
                 <Download size={15} className="inline mr-1" /> Export CSV
               </button>
-              <button onClick={handleExportXLSX} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+              <button onClick={handleExportXLSX} disabled={localEcritures.length === 0} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
                 <Download size={15} className="inline mr-1" /> Export XLSX
               </button>
               <button onClick={handleVerify} disabled={localFactures.length === 0} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
