@@ -1,0 +1,238 @@
+/**
+ * Parser for "Liste du personnel" Excel format (BAUD)
+ * Reads DP sheet (employee list) and Pointage sheet (absences, avances, CP, HS)
+ */
+
+export interface Employee {
+  matricule: string;
+  nom: string;
+  prenom: string;
+  cin: string;
+  date_naissance: string;
+  situation_fam: string; // M=Célibataire, C=Célibataire, M=Marié, D=Divorcé, V=Veuf
+  nombre_enfants: number;
+  echelon: string;
+  categorie: string;
+  badges: string;
+  fonction: string;
+  adresse: string;
+  type_contrat: string; // CDI, CDD, etc.
+  duree: string;
+  numero_cnss: string;
+  bq_ou_poste: string;
+  rib_ou_ccp: string;
+  salaire_brut: number;
+  nouveau_salaire_brut: number;
+  date_sortie: string;
+  date_recrutement: string;
+}
+
+export interface PointageData {
+  matricule: string;
+  nom: string;
+  prenom: string;
+  absences: string;
+  avances: number;
+  conges_payes: string;
+  heures_supplementaires: string;
+}
+
+export interface ParsedFiche {
+  employees: Employee[];
+  pointage: PointageData[];
+  mois: number;
+  annee: number;
+  source_file: string;
+}
+
+// Column indices for "Liste du personnel" DP sheet (0-based, header row at index 3)
+const DP_COLUMNS: Record<string, number> = {
+  matricule: 0,       // Col A: row number (used as matricule fallback)
+  date_recrutement: 2, // Col C
+  nom: 3,             // Col D
+  prenom: 4,          // Col E
+  cin: 5,             // Col F
+  date_naissance: 6,  // Col G
+  sf: 7,              // Col H: Situation familiale
+  ne: 8,              // Col I: Nombre d'enfants
+  echelon: 9,         // Col J
+  categorie: 10,      // Col K
+  badges: 11,         // Col L
+  fonction: 12,       // Col M
+  adresse: 13,        // Col N
+  contrat: 14,        // Col O
+  duree: 15,          // Col P
+  cnss: 16,           // Col Q
+  bq_poste: 17,       // Col R
+  rib_ccp: 18,        // Col S
+  salaire_brut: 19,   // Col T
+  nouveau_brut: 20,   // Col U
+  date_sortie: 21,    // Col V
+};
+
+const POINTAGE_COLUMNS: Record<string, number> = {
+  matricule: 0,
+  nom: 2,
+  prenom: 3,
+  absences: 4,
+  avances: 5,
+  conges_payes: 6,
+  heures_sup: 7,
+};
+
+function cleanStr(v: any): string {
+  return String(v ?? '').trim();
+}
+
+function parseNum(v: any): number {
+  if (typeof v === 'number') return v;
+  const s = String(v ?? '').replace(/\s/g, '').replace(',', '.');
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
+function detectDateMonthYear(filename: string): { mois: number; annee: number } | null {
+  // Try to extract month/year from filename
+  const months: Record<string, number> = {
+    'janvier': 1, 'fevrier': 2, 'février': 2, 'mars': 3, 'avril': 4,
+    'mai': 5, 'juin': 6, 'juillet': 7, 'aout': 8, 'août': 8,
+    'septembre': 9, 'octobre': 10, 'novembre': 11, 'decembre': 12, 'décembre': 12
+  };
+  const lower = filename.toLowerCase();
+  for (const [name, num] of Object.entries(months)) {
+    if (lower.includes(name)) {
+      const yearMatch = lower.match(/20\d{2}/);
+      const annee = yearMatch ? parseInt(yearMatch[0]) : new Date().getFullYear();
+      return { mois: num, annee };
+    }
+  }
+  return null;
+}
+
+export function parseFichePersonnel(workbook: any, filename: string): ParsedFiche {
+  const employees: Employee[] = [];
+  const pointage: PointageData[] = [];
+
+  // Parse DP sheet
+  const dpSheet = workbook.Sheets['DP'];
+  if (dpSheet) {
+    const data: any[][] = XLSX.utils.sheet_to_json(dpSheet, { header: 1, defval: '' });
+
+    // Find header row (look for "Mat" or "Nom" in first 10 rows)
+    let headerRow = 3;
+    for (let i = 0; i < Math.min(10, data.length); i++) {
+      const row = data[i];
+      if (row && (String(row[1] || '').trim() === 'Mat' || String(row[3] || '').trim() === 'Nom')) {
+        headerRow = i;
+        break;
+      }
+    }
+
+    // Parse employees from rows after header
+    for (let i = headerRow + 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row || row.length === 0) continue;
+
+      const nom = cleanStr(row[DP_COLUMNS.nom]);
+      const prenom = cleanStr(row[DP_COLUMNS.prenom]);
+      if (!nom && !prenom) continue; // Skip empty rows
+
+      // Matricule: use the "Mat" column (index 1) if present, otherwise use row number
+      let matricule = cleanStr(row[1]);
+      if (!matricule) {
+        matricule = String(row[0] || i - headerRow);
+      }
+
+      const sf = cleanStr(row[DP_COLUMNS.sf]);
+      let situationFam = 'C'; // Default: célibataire
+      if (sf === 'M' || sf.toLowerCase().includes('mar')) situationFam = 'M';
+      else if (sf === 'C' || sf.toLowerCase().includes('célib') || sf.toLowerCase().includes('celib')) situationFam = 'C';
+      else if (sf === 'D' || sf.toLowerCase().includes('div')) situationFam = 'D';
+      else if (sf === 'V' || sf.toLowerCase().includes('veuf')) situationFam = 'V';
+
+      employees.push({
+        matricule,
+        nom: nom.toUpperCase(),
+        prenom,
+        cin: cleanStr(row[DP_COLUMNS.cin]),
+        date_naissance: cleanStr(row[DP_COLUMNS.date_naissance]),
+        situation_fam: situationFam,
+        nombre_enfants: Math.max(0, Math.floor(parseNum(row[DP_COLUMNS.ne]))),
+        echelon: cleanStr(row[DP_COLUMNS.echelon]),
+        categorie: cleanStr(row[DP_COLUMNS.categorie]),
+        badges: cleanStr(row[DP_COLUMNS.badges]),
+        fonction: cleanStr(row[DP_COLUMNS.fonction]),
+        adresse: cleanStr(row[DP_COLUMNS.adresse]),
+        type_contrat: cleanStr(row[DP_COLUMNS.contrat]),
+        duree: cleanStr(row[DP_COLUMNS.duree]),
+        numero_cnss: cleanStr(row[DP_COLUMNS.cnss]),
+        bq_ou_poste: cleanStr(row[DP_COLUMNS.bq_poste]),
+        rib_ou_ccp: cleanStr(row[DP_COLUMNS.rib_ccp]),
+        salaire_brut: parseNum(row[DP_COLUMNS.salaire_brut]),
+        nouveau_salaire_brut: parseNum(row[DP_COLUMNS.nouveau_brut]),
+        date_sortie: cleanStr(row[DP_COLUMNS.date_sortie]),
+        date_recrutement: cleanStr(row[DP_COLUMNS.date_recrutement]),
+      });
+    }
+  }
+
+  // Parse Pointage sheet
+  const ptgSheet = workbook.Sheets['Pointage'];
+  if (ptgSheet) {
+    const data: any[][] = XLSX.utils.sheet_to_json(ptgSheet, { header: 1, defval: '' });
+
+    let headerRow = 3;
+    for (let i = 0; i < Math.min(10, data.length); i++) {
+      const row = data[i];
+      if (row && String(row[1] || '').trim() === 'Mat') {
+        headerRow = i;
+        break;
+      }
+    }
+
+    // Pointage has alternating rows: data row + detail row
+    for (let i = headerRow + 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row) continue;
+
+      const nom = cleanStr(row[POINTAGE_COLUMNS.nom]);
+      const prenom = cleanStr(row[POINTAGE_COLUMNS.prenom]);
+      if (!nom && !prenom) continue;
+
+      let matricule = cleanStr(row[1]);
+      if (!matricule) matricule = String(row[0] || '');
+
+      // Skip detail rows (row after each employee, with phone loans etc.)
+      const absences = cleanStr(row[POINTAGE_COLUMNS.absences]);
+      const avances = parseNum(row[POINTAGE_COLUMNS.avances]);
+      const cp = cleanStr(row[POINTAGE_COLUMNS.conges_payes]);
+      const hs = cleanStr(row[POINTAGE_COLUMNS.heures_sup]);
+
+      // Only add if has meaningful data
+      if (absences || avances || cp || hs) {
+        pointage.push({
+          matricule,
+          nom: nom.toUpperCase(),
+          prenom,
+          absences,
+          avances,
+          conges_payes: cp,
+          heures_supplementaires: hs,
+        });
+      }
+    }
+  }
+
+  const dateInfo = detectDateMonthYear(filename);
+
+  return {
+    employees,
+    pointage,
+    mois: dateInfo?.mois || new Date().getMonth() + 1,
+    annee: dateInfo?.annee || new Date().getFullYear(),
+    source_file: filename,
+  };
+}
+
+// Re-export XLSX for the parser to use
+import * as XLSX from 'xlsx';

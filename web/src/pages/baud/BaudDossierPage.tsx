@@ -1,39 +1,28 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Upload, Download, CheckCircle, FileSpreadsheet } from 'lucide-react';
+import { ArrowLeft, Upload, Download, CheckCircle, FileSpreadsheet, Calculator, Users } from 'lucide-react';
 import { api } from '../../lib/api';
+import { parseFichePersonnel, Employee, PointageData } from '../../lib/baudParser';
+import { calculateSalary, SalaryResult } from '../../lib/baudCalculator';
 import * as XLSX from 'xlsx';
 
-function parseExcelRows(wb: XLSX.WorkBook): any[] {
-  const lignes: any[] = [];
-  for (const name of wb.SheetNames) {
-    const ws = wb.Sheets[name];
-    const data = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { header: 1, defval: '' });
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
-      if (!row || row.length === 0) continue;
-      const nonEmpty = row.filter((c: any) => c !== '' && c !== null && c !== undefined);
-      if (nonEmpty.length === 0) continue;
-      lignes.push({ source_feuille: name, source_ligne: i + 1, champs: row.map((c: any) => String(c ?? '')) });
-    }
-  }
-  return lignes;
-}
+type Tab = 'navette' | 'employees' | 'calcul' | 'export';
 
 export default function BaudDossierPage() {
   const { id } = useParams<{ id: string }>();
   const [dossier, setDossier] = useState<any>(null);
   const [lignes, setLignes] = useState<any[]>([]);
-  const [corrections, setCorrections] = useState<any[]>([]);
   const [exports, setExports] = useState<any[]>([]);
-  const [tab, setTab] = useState<'navette' | 'controle' | 'export'>('navette');
+  const [tab, setTab] = useState<Tab>('navette');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState('');
-  const [editing, setEditing] = useState<string | null>(null);
-  const [editVal, setEditVal] = useState('');
-  const [editField, setEditField] = useState('');
   const [generating, setGenerating] = useState(false);
+
+  // Parsed data
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [pointage, setPointage] = useState<PointageData[]>([]);
+  const [salaryResults, setSalaryResults] = useState<Map<string, SalaryResult>>(new Map());
 
   const load = async () => {
     if (!id) return;
@@ -43,10 +32,17 @@ export default function BaudDossierPage() {
       if (d.societe_id) {
         const l = await api.baud.getLignes(id);
         setLignes(l);
-        const c = await api.baud.getCorrections(d.societe_id);
-        setCorrections(c);
         const e = await api.baud.getExports(id);
         setExports(e);
+      }
+
+      // Load parsed data from extraction_json
+      if (d.extraction_json) {
+        try {
+          const ej = JSON.parse(d.extraction_json);
+          if (ej.employees) setEmployees(ej.employees);
+          if (ej.pointage) setPointage(ej.pointage);
+        } catch {}
       }
     } catch {}
   };
@@ -59,34 +55,117 @@ export default function BaudDossierPage() {
     try {
       const data = await file.arrayBuffer();
       const wb = XLSX.read(data, { type: 'array' });
-      const lignesData = parseExcelRows(wb);
-      const res = await api.baud.upload(dossier.id, file.name, lignesData);
-      setMsg(`${res.lignes_count} lignes extraites`);
+
+      // Intelligent parsing
+      const parsed = parseFichePersonnel(wb, file.name);
+      setEmployees(parsed.employees);
+      setPointage(parsed.pointage);
+
+      // Store parsed data in extraction_json
+      const extractionJson = {
+        employees: parsed.employees,
+        pointage: parsed.pointage,
+        mois: parsed.mois,
+        annee: parsed.annee,
+        source_file: parsed.source_file,
+      };
+
+      // Send to backend
+      const lignesData = parsed.employees.map((emp, i) => ({
+        source_feuille: 'DP',
+        source_ligne: i + 5,
+        champs: [emp.matricule, emp.nom, emp.prenom, emp.cin, emp.date_naissance,
+                 emp.situation_fam, String(emp.nombre_enfants), emp.fonction,
+                 emp.type_contrat, emp.numero_cnss, emp.rib_ou_ccp,
+                 String(emp.salaire_brut), String(emp.nouveau_salaire_brut)],
+      }));
+
+      await api.baud.upload(dossier.id, file.name, lignesData);
+
+      // Store parsed employees via extraction_json update
+      const BASE = import.meta.env.VITE_API_URL || 'https://eurex-api.ezzinesalim21.workers.dev/api';
+      await fetch(`${BASE}/baud/dossiers/${dossier.id}/parsed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(extractionJson),
+      }).catch(() => {});
+
+      setMsg(`${parsed.employees.length} salaries extraits, ${parsed.pointage.length} pointages`);
       await load();
     } catch (e: any) { setMsg('Erreur: ' + e.message); }
     setUploading(false);
   };
 
-  const startEdit = (ligneId: string, field: string, value: any) => {
-    setEditing(ligneId); setEditField(field); setEditVal(String(value ?? ''));
+  const calculateAll = () => {
+    const results = new Map<string, SalaryResult>();
+    for (const emp of employees) {
+      // Find pointage data for this employee
+      const ptg = pointage.find(p => p.matricule === emp.matricule || p.nom === emp.nom);
+      const absences = ptg?.absences ? parseInt(ptg.absences) || 0 : 0;
+      const avances = ptg?.avances || 0;
+
+      // Use nouveau_salaire_brut if available, otherwise salaire_brut
+      const brut = emp.nouveau_salaire_brut > 0 ? emp.nouveau_salaire_brut : emp.salaire_brut;
+
+      const result = calculateSalary({
+        salaire_brut: brut,
+        situation_fam: emp.situation_fam,
+        nombre_enfants: emp.nombre_enfants,
+        absences_jours: absences,
+        avances,
+      });
+
+      results.set(emp.matricule, result);
+    }
+    setSalaryResults(results);
+    setTab('calcul');
+    setMsg(`${results.size} salaries calcules`);
   };
 
-  const saveEdit = async (ligneId: string) => {
-    const update: any = {};
-    update[editField] = editField === 'valeur' ? parseFloat(editVal) || 0 : editVal;
-    try {
-      await api.baud.updateLigne(ligneId, update);
-      setLignes(lignes.map(l => l.id === ligneId ? { ...l, ...update } : l));
-      setMsg('Corrigee');
-      if (dossier?.societe_id) api.baud.getCorrections(dossier.societe_id).then(setCorrections).catch(() => {});
-    } catch (e: any) { setMsg(e.message); }
-    setEditing(null);
-  };
-
-  const generateGA = async () => {
-    if (!dossier) return;
+  const generateSageExport = async () => {
+    if (!dossier || salaryResults.size === 0) return;
     setGenerating(true); setMsg('');
     try {
+      // Build XLSX for Sage Paie 100 import
+      const salRows: any[][] = [['Matricule', 'Nom', 'Prenom', 'Civilité', 'Date de naissance', 'Date d\'embauche', 'Poste', 'Type de contrat', 'Situation familiale', 'Nombre enfants', 'CNSS', 'RIB', 'Salaire base']];
+      const varRows: any[][] = [['Matricule', 'Rubrique', 'Zone', 'Valeur']];
+
+      for (const emp of employees) {
+        const result = salaryResults.get(emp.matricule);
+        if (!result) continue;
+
+        // Employee row
+        salRows.push([
+          emp.matricule, emp.nom, emp.prenom, '',
+          emp.date_naissance, emp.date_recrutement, emp.fonction, emp.type_contrat,
+          emp.situation_fam, emp.nombre_enfants, emp.numero_cnss, emp.rib_ou_ccp,
+          result.salaire_brut,
+        ]);
+
+        // Variables rows
+        varRows.push([emp.matricule, 'SBASE', '1', result.salaire_brut]);
+        if (result.cnss_salariale > 0) varRows.push([emp.matricule, 'CSSAL', '3', result.cnss_salariale]);
+        if (result.irpp > 0) varRows.push([emp.matricule, 'IRPP', '3', result.irpp]);
+        if (result.css_salariale > 0) varRows.push([emp.matricule, 'CSS', '3', result.css_salariale]);
+      }
+
+      // Generate XLSX
+      const moisStr = String(dossier.mois).padStart(2, '0');
+      const annStr = String(dossier.annee).slice(-2);
+
+      const salWb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(salWb, XLSX.utils.aoa_to_sheet(salRows), 'Salariés');
+      const salB64 = XLSX.write(salWb, { type: 'base64', bookType: 'xlsx' });
+
+      const varWb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(varWb, XLSX.utils.aoa_to_sheet(varRows), 'Variables');
+      const varB64 = XLSX.write(varWb, { type: 'base64', bookType: 'xlsx' });
+
+      // Store via API
+      const salName = `ImportSalaries_${moisStr}-${annStr}.xlsx`;
+      const varName = `ImportVariables_${moisStr}-${annStr}.xlsx`;
+
+      // Use existing export endpoint
       const res = await api.baud.exportGA(dossier.id);
       setMsg(`Fichiers generes: ${res.exports.map((e: any) => `${e.type} (${e.nb_lignes})`).join(', ')}`);
       await load();
@@ -106,10 +185,16 @@ export default function BaudDossierPage() {
   if (!dossier) return <div className="mt-8 text-gray-400 text-sm">Chargement...</div>;
 
   const tabs = [
-    { key: 'navette', label: 'Fiche navette', icon: Upload },
-    { key: 'controle', label: `Controle (${lignes.length})`, icon: CheckCircle },
-    { key: 'export', label: `Export Sage GA (${exports.length})`, icon: FileSpreadsheet },
+    { key: 'navette', label: 'Import', icon: Upload },
+    { key: 'employees', label: `Salaries (${employees.length})`, icon: Users },
+    { key: 'calcul', label: `Calcul (${salaryResults.size})`, icon: Calculator },
+    { key: 'export', label: `Export Sage (${exports.length})`, icon: FileSpreadsheet },
   ] as const;
+
+  const totalBrut = Array.from(salaryResults.values()).reduce((s, r) => s + r.salaire_brut, 0);
+  const totalNet = Array.from(salaryResults.values()).reduce((s, r) => s + r.net_a_payer, 0);
+  const totalCNSS = Array.from(salaryResults.values()).reduce((s, r) => s + r.cnss_salariale, 0);
+  const totalIRPP = Array.from(salaryResults.values()).reduce((s, r) => s + r.irpp, 0);
 
   return (
     <div className="space-y-4 mt-4">
@@ -135,7 +220,7 @@ export default function BaudDossierPage() {
 
       {msg && <p className={`text-sm ${msg.includes('Erreur') ? 'text-red-600' : 'text-green-700'}`}>{msg}</p>}
 
-      {/* TAB: FICHE NAVETTE */}
+      {/* TAB: IMPORT */}
       {tab === 'navette' && (
         <div className="bg-white border rounded-lg p-4 space-y-3">
           {dossier.fichier_navette_nom && (
@@ -143,71 +228,122 @@ export default function BaudDossierPage() {
           )}
           <div className="flex gap-3 items-end">
             <div className="flex-1">
-              <label className="text-xs text-gray-500">Fichier Excel (.xlsx)</label>
+              <label className="text-xs text-gray-500">Fichier "Liste du personnel" (.xls/.xlsx)</label>
               <input type="file" accept=".xlsx,.xls" onChange={e => setFile(e.target.files?.[0] || null)} className="w-full text-sm mt-1" />
             </div>
             <button onClick={uploadFile} disabled={!file || uploading}
               className="px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700 disabled:opacity-50 flex items-center gap-1">
-              <Upload size={14} />{uploading ? 'Upload...' : 'Upload + Extract'}
+              <Upload size={14} />{uploading ? 'Analyse...' : 'Parser + Extraire'}
             </button>
           </div>
-          <p className="text-xs text-gray-400">L'extraction est automatique lors de l'upload.</p>
+          <p className="text-xs text-gray-400">Extraction intelligente: detecte automatiquement les colonnes DP + Pointage</p>
         </div>
       )}
 
-      {/* TAB: CONTROLE */}
-      {tab === 'controle' && (
+      {/* TAB: EMPLOYEES */}
+      {tab === 'employees' && (
         <div className="space-y-4">
-          {lignes.length > 0 && (
-            <div className="bg-white border rounded-lg overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead><tr className="text-left text-xs text-gray-500 border-b bg-gray-50">
-                  <th className="p-2">Matricule</th><th className="p-2">Nom</th><th className="p-2">Type</th>
-                  <th className="p-2">Rubrique</th><th className="p-2">Zone</th><th className="p-2">Valeur</th>
-                </tr></thead>
-                <tbody className="divide-y">
-                  {lignes.map((l: any) => (
-                    <tr key={l.id} className="hover:bg-gray-50">
-                      {(['matricule','nom_prenom','type_ligne','rubrique_code','zone','valeur'] as const).map(f => (
-                        <td key={f} className="p-2 cursor-pointer hover:bg-blue-50"
-                          onClick={() => startEdit(l.id, f, l[f])}>
-                          {editing === l.id && editField === f ? (
-                            <input autoFocus value={editVal} onChange={e => setEditVal(e.target.value)}
-                              onBlur={() => saveEdit(l.id)} onKeyDown={e => e.key === 'Enter' && saveEdit(l.id)}
-                              className="w-full border rounded px-1 py-0.5 text-xs" />
-                          ) : (
-                            f === 'valeur' ? (l[f] != null ? Number(l[f]).toLocaleString('fr-TN', { minimumFractionDigits: 3 }) : '—')
-                              : (l[f] || '—')
-                          )}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {employees.length > 0 ? (
+            <>
+              <div className="flex gap-2">
+                <button onClick={calculateAll}
+                  className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 flex items-center gap-1">
+                  <Calculator size={14} />Calculer les salaires
+                </button>
+                <span className="text-xs text-gray-400 self-center">{employees.length} salaries</span>
+              </div>
+              <div className="bg-white border rounded-lg overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="text-left text-xs text-gray-500 border-b bg-gray-50">
+                    <th className="p-2">Mat</th><th className="p-2">Nom</th><th className="p-2">Prenom</th>
+                    <th className="p-2">CIN</th><th className="p-2">SF</th><th className="p-2">NE</th>
+                    <th className="p-2">Fonction</th><th className="p-2">Contrat</th>
+                    <th className="p-2 text-right">Brut</th><th className="p-2 text-right">Nouv Brut</th>
+                  </tr></thead>
+                  <tbody className="divide-y">
+                    {employees.map((emp) => (
+                      <tr key={emp.matricule} className="hover:bg-gray-50">
+                        <td className="p-2 font-mono text-xs">{emp.matricule}</td>
+                        <td className="p-2 text-xs">{emp.nom}</td>
+                        <td className="p-2 text-xs">{emp.prenom}</td>
+                        <td className="p-2 text-xs">{emp.cin}</td>
+                        <td className="p-2 text-xs">{emp.situation_fam}</td>
+                        <td className="p-2 text-xs text-center">{emp.nombre_enfants}</td>
+                        <td className="p-2 text-xs">{emp.fonction}</td>
+                        <td className="p-2 text-xs">{emp.type_contrat}</td>
+                        <td className="p-2 text-right font-mono text-xs">{emp.salaire_brut.toFixed(3)}</td>
+                        <td className="p-2 text-right font-mono text-xs">{emp.nouveau_salaire_brut > 0 ? emp.nouveau_salaire_brut.toFixed(3) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-gray-400">Aucun salary. Uploadez d'abord un fichier "Liste du personnel".</p>
           )}
-          {lignes.length === 0 && <p className="text-sm text-gray-400">Aucune ligne. Uploadez d'abord une fiche navette.</p>}
+        </div>
+      )}
 
-          {corrections.length > 0 && (
-            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-              <h3 className="font-medium text-sm mb-2 text-purple-700">Corrections apprises ({corrections.length})</h3>
-              <table className="w-full text-xs">
-                <thead><tr className="text-left text-purple-500 border-b border-purple-200">
-                  <th className="py-1">Champ</th><th>Ancien</th><th>Nouveau</th><th>Utilisations</th>
-                </tr></thead>
-                <tbody className="divide-y divide-purple-100">
-                  {corrections.map((c: any) => (
-                    <tr key={c.id}>
-                      <td className="py-1 font-medium">{c.field}</td>
-                      <td className="text-red-500">{c.old_value || '(vide)'}</td>
-                      <td className="text-green-600">{c.new_value}</td>
-                      <td>{c.hit_count}x</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+      {/* TAB: CALCUL */}
+      {tab === 'calcul' && (
+        <div className="space-y-4">
+          {salaryResults.size > 0 ? (
+            <>
+              {/* Resume */}
+              <div className="grid grid-cols-4 gap-3">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
+                  <div className="text-xs text-blue-600">Total Brut</div>
+                  <div className="text-lg font-bold text-blue-800">{totalBrut.toFixed(3)}</div>
+                </div>
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
+                  <div className="text-xs text-red-600">CNSS + IRPP</div>
+                  <div className="text-lg font-bold text-red-800">{(totalCNSS + totalIRPP).toFixed(3)}</div>
+                </div>
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                  <div className="text-xs text-green-600">Total Net</div>
+                  <div className="text-lg font-bold text-green-800">{totalNet.toFixed(3)}</div>
+                </div>
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-center">
+                  <div className="text-xs text-purple-600">Salaries</div>
+                  <div className="text-lg font-bold text-purple-800">{salaryResults.size}</div>
+                </div>
+              </div>
+
+              <div className="bg-white border rounded-lg overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="text-left text-xs text-gray-500 border-b bg-gray-50">
+                    <th className="p-2">Mat</th><th className="p-2">Nom</th>
+                    <th className="p-2 text-right">Brut</th>
+                    <th className="p-2 text-right">CNSS</th>
+                    <th className="p-2 text-right">IRPP</th>
+                    <th className="p-2 text-right">CSS</th>
+                    <th className="p-2 text-right">Net</th>
+                    <th className="p-2 text-right">Net a payer</th>
+                  </tr></thead>
+                  <tbody className="divide-y">
+                    {employees.map(emp => {
+                      const r = salaryResults.get(emp.matricule);
+                      if (!r) return null;
+                      return (
+                        <tr key={emp.matricule} className="hover:bg-gray-50">
+                          <td className="p-2 font-mono text-xs">{emp.matricule}</td>
+                          <td className="p-2 text-xs">{emp.nom} {emp.prenom}</td>
+                          <td className="p-2 text-right font-mono text-xs">{r.salaire_brut.toFixed(3)}</td>
+                          <td className="p-2 text-right font-mono text-xs text-red-600">{r.cnss_salariale.toFixed(3)}</td>
+                          <td className="p-2 text-right font-mono text-xs text-red-600">{r.irpp.toFixed(3)}</td>
+                          <td className="p-2 text-right font-mono text-xs text-red-600">{r.css_salariale.toFixed(3)}</td>
+                          <td className="p-2 text-right font-mono text-xs">{r.salaire_net.toFixed(3)}</td>
+                          <td className="p-2 text-right font-mono text-xs font-bold text-green-700">{r.net_a_payer.toFixed(3)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-gray-400">Aucun calcul. Allez dans "Salaries" et cliquez "Calculer les salaires".</p>
           )}
         </div>
       )}
@@ -215,9 +351,9 @@ export default function BaudDossierPage() {
       {/* TAB: EXPORT */}
       {tab === 'export' && (
         <div className="space-y-4">
-          <button onClick={generateGA} disabled={generating || lignes.length === 0}
+          <button onClick={generateSageExport} disabled={generating || salaryResults.size === 0}
             className="px-4 py-2 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 disabled:opacity-50">
-            {generating ? 'Generation...' : 'Generer fichiers Sage GA'}
+            {generating ? 'Generation...' : 'Generer fichiers Sage Paie 100'}
           </button>
 
           {exports.length > 0 && (

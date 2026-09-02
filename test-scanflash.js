@@ -1,9 +1,6 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import * as pdfjsLib from './web/node_modules/pdfjs-dist/build/pdf.mjs';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const fs = require('fs');
+const path = require('path');
+const pdfjsLib = require('./web/node_modules/pdfjs-dist/legacy/build/pdf.js');
 
 let passed = 0;
 let failed = 0;
@@ -93,7 +90,8 @@ function parseScanInvoice(text) {
   };
 }
 
-function generateEcritures(f) {
+function generateEcritures(facture) {
+  const f = facture;
   const ecritures = [];
   const date = f.date_facture;
   const facNum = f.numero || '';
@@ -139,13 +137,12 @@ async function extractTextFromPDF(filePath) {
   return fullText;
 }
 
-async function testDir(dirPath, label, targetMonth) {
+async function testDir(dirPath, label) {
   const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.pdf'));
   console.log(`\n=== ${label}: ${files.length} PDFs ===`);
   let totalD = 0, totalC = 0;
-  let facCount = 0, avrCount = 0, rejectedCount = 0, monthSkip = 0;
-  let withTimbre = 0, withoutTimbre = 0, withFodec = 0, withoutFodec = 0;
-  let zeroTVA = 0;
+  let facCount = 0, avrCount = 0, rejectedCount = 0;
+  const details = [];
 
   for (const file of files) {
     const fp = path.join(dirPath, file);
@@ -156,16 +153,7 @@ async function testDir(dirPath, label, targetMonth) {
         rejectedCount++;
         continue;
       }
-      // Filter: only keep invoices whose date matches the target month (YYYY-MM)
-      if (targetMonth && !parsed.date_facture.startsWith(targetMonth)) {
-        monthSkip++;
-        console.log(`  SKIP: ${parsed.numero} date=${parsed.date_facture} (expected ${targetMonth}) — ${file}`);
-        continue;
-      }
       if (parsed.is_avoir) avrCount++; else facCount++;
-      if (parsed.hasTimbreLine) withTimbre++; else withoutTimbre++;
-      if (parsed.fodec > 0) withFodec++; else withoutFodec++;
-      if (parsed.total_ht_0 > 0) zeroTVA++;
 
       const ecritures = generateEcritures(parsed);
       const sumD = ecritures.filter(e => e.sens === 'D').reduce((s, e) => s + e.montant, 0);
@@ -183,6 +171,19 @@ async function testDir(dirPath, label, targetMonth) {
       } else {
         passed++;
       }
+
+      details.push({
+        numero: parsed.numero,
+        type: parsed.is_avoir ? 'AVR' : 'FAC',
+        ht: parsed.total_ht_19 || parsed.total_ht_0,
+        tva: parsed.tva_19,
+        fodec: parsed.fodec,
+        timbre: parsed.timbre,
+        ttc: parsed.total_ttc,
+        hasTimbreLine: parsed.hasTimbreLine,
+        d: sumD,
+        c: sumC,
+      });
     } catch (e) {
       failed++;
       const msg = `  ERROR: ${file} — ${e.message}`;
@@ -191,35 +192,23 @@ async function testDir(dirPath, label, targetMonth) {
     }
   }
 
-  console.log(`  Parsed: ${facCount} FAC + ${avrCount} AVR = ${facCount + avrCount} | Rejected: ${rejectedCount} | Month-skip: ${monthSkip}`);
-  console.log(`  With timbre: ${withTimbre} | Without timbre: ${withoutTimbre}`);
-  console.log(`  With FODEC: ${withFodec} | Without FODEC: ${withoutFodec}`);
-  console.log(`  0% TVA (707003): ${zeroTVA}`);
+  console.log(`\n  Parsed: ${facCount} FAC + ${avrCount} AVR = ${facCount + avrCount} | Rejected: ${rejectedCount}`);
   console.log(`  Total D=${totalD.toFixed(3)} C=${totalC.toFixed(3)} diff=${Math.abs(totalD - totalC).toFixed(3)}`);
 
-  return { totalD, totalC, facCount, avrCount, rejectedCount, monthSkip };
+  return { details, totalD, totalC, facCount, avrCount, rejectedCount };
 }
 
 async function main() {
   console.log('SCANFLASH Parser Test (Node.js + pdf.js)\n');
 
-  if (fs.existsSync('D:\\vt scan')) {
-    await testDir('D:\\vt scan', 'JUIN 2026', '2026-06');
+  const dir6 = 'D:\\vt scan';
+  const dir1 = 'D:\\vt scan\\01-2026\\VENTE';
+
+  if (fs.existsSync(dir6)) {
+    await testDir(dir6, 'JUIN 2026 (162 PDFs)');
   }
-  if (fs.existsSync('D:\\vt scan\\05-2026\\Facture')) {
-    await testDir('D:\\vt scan\\05-2026\\Facture', 'MAI 2026', '2026-05');
-  }
-  if (fs.existsSync('D:\\vt scan\\04-2026\\Facture')) {
-    await testDir('D:\\vt scan\\04-2026\\Facture', 'AVRIL 2026', '2026-04');
-  }
-  if (fs.existsSync('D:\\vt scan\\03-2026\\Facture')) {
-    await testDir('D:\\vt scan\\03-2026\\Facture', 'MARS 2026', '2026-03');
-  }
-  if (fs.existsSync('D:\\vt scan\\02-2026\\Facture')) {
-    await testDir('D:\\vt scan\\02-2026\\Facture', 'FEVRIER 2026', '2026-02');
-  }
-  if (fs.existsSync('D:\\vt scan\\01-2026\\VENTE')) {
-    await testDir('D:\\vt scan\\01-2026\\VENTE', 'JANVIER 2026', '2026-01');
+  if (fs.existsSync(dir1)) {
+    await testDir(dir1, 'JANVIER 2026 (106 PDFs)');
   }
 
   console.log(`\n=== RESULTS ===`);

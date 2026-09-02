@@ -861,6 +861,19 @@ JSON: {"verdict":"OK/ERREUR","score":0-100,"checks":[{"name":"detail","status":"
         }
       }
 
+      // --- BAUD: PARSED DATA (store employees + pointage from intelligent parser) ---
+      const baudParsedMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)\/parsed$/);
+      if (baudParsedMatch && method === 'POST') {
+        const did = baudParsedMatch[1];
+        try {
+          const b = await request.json() as any;
+          await env.DB.prepare("UPDATE dossiers_paie SET extraction_json = ?, updated_at = datetime('now') WHERE id = ?").bind(JSON.stringify(b), did).run();
+          return json({ ok: true });
+        } catch (e: any) {
+          return json({ error: 'Erreur: ' + (e.message || e) }, 500);
+        }
+      }
+
       // --- BAUD: LIGNES ---
       const baudLignesMatch = path.match(/^\/api\/baud\/dossiers\/([^/]+)\/lignes$/);
       if (baudLignesMatch && method === 'GET') {
