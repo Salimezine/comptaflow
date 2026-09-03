@@ -20,12 +20,14 @@ export interface VerificationResult {
   missing: string[];
   anomalies: string[];
   corrections: CorrectionAction[];
+  autoFixes: AutoFixAction[];
   summary: {
     totalEmployees: number;
     verified: number;
     warnings: number;
     errors: number;
     corrected: number;
+    autoFixed: number;
   };
 }
 
@@ -36,6 +38,14 @@ export interface CorrectionAction {
   oldValue: any;
   newValue: any;
   reason: string;
+}
+
+export interface AutoFixAction {
+  type: 'add_pointage' | 'fix_duplicate' | 'fix_smig' | 'fix_cnss' | 'fix_matricule';
+  description: string;
+  matricule: string;
+  data: any;
+  applied: boolean;
 }
 
 // Tunisian Labor Code Constants 2026
@@ -74,6 +84,7 @@ export function verifySalaryCalculations(
   const missing: string[] = [];
   const anomalies: string[] = [];
   const corrections: CorrectionAction[] = [];
+  const autoFixes: AutoFixAction[] = [];
 
   // Create pointage lookup
   const pointageMap = new Map<string, PointageData>();
@@ -105,7 +116,7 @@ export function verifySalaryCalculations(
     if (!result) continue;
 
     const ptg = pointageMap.get(emp.matricule);
-    const verificationChecks = verifyEmployee(emp, ptg, result, corrections);
+    const verificationChecks = verifyEmployee(emp, ptg, result, corrections, autoFixes);
     
     for (const check of verificationChecks) {
       checks.push(check);
@@ -116,7 +127,7 @@ export function verifySalaryCalculations(
   }
 
   // 3. Cross-employee anomaly detection
-  const crossChecks = detectCrossEmployeeAnomalies(employees, salaryResults);
+  const crossChecks = detectCrossEmployeeAnomalies(employees, salaryResults, autoFixes);
   for (const anomaly of crossChecks) {
     anomalies.push(anomaly);
     checks.push({
@@ -142,12 +153,14 @@ export function verifySalaryCalculations(
     missing,
     anomalies,
     corrections,
+    autoFixes,
     summary: {
       totalEmployees: employees.length,
       verified,
       warnings,
       errors,
       corrected: corrections.length,
+      autoFixed: autoFixes.filter(f => f.applied).length,
     },
   };
 }
@@ -159,7 +172,8 @@ function verifyEmployee(
   emp: Employee,
   ptg: PointageData | undefined,
   result: SalaryResult,
-  corrections: CorrectionAction[]
+  corrections: CorrectionAction[],
+  autoFixes: AutoFixAction[]
 ): VerificationCheck[] {
   const checks: VerificationCheck[] = [];
   const empLabel = `${emp.nom} ${emp.prenom}`;
@@ -171,6 +185,14 @@ function verifyEmployee(
       status: 'warning',
       detail: `${empLabel}: Brut ${result.salaire_brut} < SMIG ${CONSTANTS.SMIG}`,
       employee: emp.matricule,
+    });
+    // Auto-fix: set to SMIG
+    autoFixes.push({
+      type: 'fix_smig',
+      description: `Corriger le salaire de ${empLabel} au SMIG (${CONSTANTS.SMIG} DT)`,
+      matricule: emp.matricule,
+      data: { field: 'salaire_brut', newValue: CONSTANTS.SMIG },
+      applied: false,
     });
   }
 
@@ -232,6 +254,22 @@ function verifyEmployee(
       status: 'warning',
       detail: `${empLabel}: Aucune donnée de pointage`,
       employee: emp.matricule,
+    });
+    // Auto-fix: create default pointage
+    autoFixes.push({
+      type: 'add_pointage',
+      description: `Créer un pointage par défaut pour ${empLabel} (0 absences, 0 avances)`,
+      matricule: emp.matricule,
+      data: {
+        matricule: emp.matricule,
+        nom: emp.nom,
+        prenom: emp.prenom,
+        absences: '',
+        avances: 0,
+        conges_payes: '',
+        heures_supplementaires: '',
+      },
+      applied: false,
     });
   } else {
     // Check absences合理性
@@ -327,15 +365,29 @@ function calculateExpectedIRPP(revenuNetImposable: number): number {
  */
 function detectCrossEmployeeAnomalies(
   employees: Employee[],
-  salaryResults: Map<string, SalaryResult>
+  salaryResults: Map<string, SalaryResult>,
+  autoFixes: AutoFixAction[]
 ): string[] {
   const anomalies: string[] = [];
 
   // 1. Check for duplicate matricules
-  const matricules = employees.map(e => e.matricule);
-  const duplicates = matricules.filter((m, i) => matricules.indexOf(m) !== i);
-  if (duplicates.length > 0) {
-    anomalies.push(`Matricules en double: ${[...new Set(duplicates)].join(', ')}`);
+  const matriculeCount = new Map<string, number>();
+  for (const emp of employees) {
+    matriculeCount.set(emp.matricule, (matriculeCount.get(emp.matricule) || 0) + 1);
+  }
+  for (const [mat, count] of matriculeCount) {
+    if (count > 1) {
+      anomalies.push(`Matricule ${mat} en double (${count} fois)`);
+      // Auto-fix: suggest new matricule
+      const maxMat = Math.max(...employees.map(e => parseInt(e.matricule) || 0));
+      autoFixes.push({
+        type: 'fix_duplicate',
+        description: `Changer le matricule dupliqué ${mat} en ${maxMat + 1}`,
+        matricule: mat,
+        data: { newMatricule: String(maxMat + 1) },
+        applied: false,
+      });
+    }
   }
 
   // 2. Check for salary outliers (using IQR method)
@@ -456,4 +508,53 @@ export function applyCorrections(
   }
 
   return correctedResults;
+}
+
+/**
+ * Apply auto-fixes to employees and pointage data
+ */
+export function applyAutoFixes(
+  employees: Employee[],
+  pointage: PointageData[],
+  autoFixes: AutoFixAction[]
+): { employees: Employee[]; pointage: PointageData[] } {
+  let newEmployees = [...employees];
+  let newPointage = [...pointage];
+
+  for (const fix of autoFixes) {
+    if (fix.applied) continue;
+
+    switch (fix.type) {
+      case 'add_pointage':
+        // Add missing pointage entry
+        newPointage.push(fix.data);
+        break;
+
+      case 'fix_duplicate':
+        // Fix duplicate matricule (change the last occurrence)
+        const lastIndex = newEmployees.findIndex(e => e.matricule === fix.matricule);
+        if (lastIndex >= 0) {
+          newEmployees[lastIndex] = { ...newEmployees[lastIndex], matricule: fix.data.newMatricule };
+        }
+        break;
+
+      case 'fix_smig':
+        // Fix salary to SMIG
+        const empIndex = newEmployees.findIndex(e => e.matricule === fix.matricule);
+        if (empIndex >= 0) {
+          newEmployees[empIndex] = { ...newEmployees[empIndex], salaire_brut: fix.data.newValue };
+        }
+        break;
+
+      case 'fix_cnss':
+        // Fix CNSS number
+        const empIdx = newEmployees.findIndex(e => e.matricule === fix.matricule);
+        if (empIdx >= 0) {
+          newEmployees[empIdx] = { ...newEmployees[empIdx], numero_cnss: fix.data.newValue };
+        }
+        break;
+    }
+  }
+
+  return { employees: newEmployees, pointage: newPointage };
 }

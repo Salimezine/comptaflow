@@ -4,7 +4,7 @@ import { ArrowLeft, Upload, Download, CheckCircle, FileSpreadsheet, Calculator, 
 import { api } from '../../lib/api';
 import { parseFichePersonnel, Employee, PointageData } from '../../lib/baudParser';
 import { calculateSalary, SalaryResult } from '../../lib/baudCalculator';
-import { verifySalaryCalculations, applyCorrections, VerificationResult, CorrectionAction } from '../../lib/baudAI';
+import { verifySalaryCalculations, applyCorrections, applyAutoFixes, VerificationResult, CorrectionAction, AutoFixAction } from '../../lib/baudAI';
 import * as XLSX from 'xlsx';
 
 type Tab = 'navette' | 'employees' | 'controle' | 'calcul' | 'export';
@@ -132,19 +132,40 @@ export default function BaudDossierPage() {
   const handleVerifyAI = async () => {
     if (!dossier || employees.length === 0) return;
     setVerifying(true); setVerifyResult(null);
-    try { const result = verifySalaryCalculations(employees, pointage, salaryResults); setVerifyResult(result); } catch (e: any) { setVerifyResult({ verdict: 'ERREUR', error: e.message, checks: [], missing: [], anomalies: [], corrections: [], summary: { totalEmployees: 0, verified: 0, warnings: 0, errors: 0, corrected: 0 } }); }
+    try { const result = verifySalaryCalculations(employees, pointage, salaryResults); setVerifyResult(result); } catch (e: any) { setVerifyResult({ verdict: 'ERREUR', error: e.message, checks: [], missing: [], anomalies: [], corrections: [], autoFixes: [], summary: { totalEmployees: 0, verified: 0, warnings: 0, errors: 0, corrected: 0, autoFixed: 0 } }); }
     setVerifying(false);
   };
 
   const handleApplyCorrections = async () => {
-    if (!verifyResult || verifyResult.corrections.length === 0) return;
+    if (!verifyResult) return;
     try {
-      const correctedResults = applyCorrections(employees, pointage, salaryResults, verifyResult.corrections);
-      setSalaryResults(correctedResults);
-      setMsg(`${verifyResult.corrections.length} corrections appliquées`);
-      const newResult = verifySalaryCalculations(employees, pointage, correctedResults);
+      // Apply salary corrections
+      if (verifyResult.corrections.length > 0) {
+        const correctedResults = applyCorrections(employees, pointage, salaryResults, verifyResult.corrections);
+        setSalaryResults(correctedResults);
+      }
+      // Apply auto-fixes (pointage, matricules, SMIG)
+      if (verifyResult.autoFixes && verifyResult.autoFixes.length > 0) {
+        const { employees: newEmps, pointage: newPtg } = applyAutoFixes(employees, pointage, verifyResult.autoFixes);
+        setEmployees(newEmps);
+        setPointage(newPtg);
+      }
+      const totalFixed = (verifyResult.corrections?.length || 0) + (verifyResult.autoFixes?.filter((f: AutoFixAction) => f.type !== 'fix_duplicate')?.length || 0);
+      setMsg(`${totalFixed} corrections appliquées`);
+      // Re-verify after corrections
+      const newResult = verifySalaryCalculations(employees, pointage, salaryResults);
       setVerifyResult(newResult);
     } catch (e: any) { setMsg('Erreur: ' + e.message); }
+  };
+
+  const handleApplySingleFix = (fix: AutoFixAction) => {
+    const { employees: newEmps, pointage: newPtg } = applyAutoFixes(employees, pointage, [{ ...fix, applied: false }]);
+    setEmployees(newEmps);
+    setPointage(newPtg);
+    setMsg(`Fix appliqué: ${fix.description}`);
+    // Re-verify
+    const newResult = verifySalaryCalculations(newEmps, newPtg, salaryResults);
+    setVerifyResult(newResult);
   };
 
   // Edit employee
@@ -352,10 +373,30 @@ export default function BaudDossierPage() {
                 </div>
               )}
 
+              {verifyResult.autoFixes && verifyResult.autoFixes.length > 0 && (
+                <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-green-700"><Wand2 size={12} className="inline mr-1" />{verifyResult.autoFixes.length} corrections automatiques</span>
+                    <button onClick={handleApplyCorrections} className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 flex items-center gap-1"><Wand2 size={12} />Tout appliquer</button>
+                  </div>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {verifyResult.autoFixes.map((fix: AutoFixAction, i: number) => (
+                      <div key={i} className="flex items-center justify-between text-xs bg-white p-2 rounded border">
+                        <div className="flex-1">
+                          <span className={`inline-block w-2 h-2 rounded-full mr-2 ${fix.type === 'add_pointage' ? 'bg-blue-500' : fix.type === 'fix_duplicate' ? 'bg-red-500' : fix.type === 'fix_smig' ? 'bg-amber-500' : 'bg-gray-500'}`}></span>
+                          <strong>{fix.type === 'add_pointage' ? 'Pointage' : fix.type === 'fix_duplicate' ? 'Matricule' : fix.type === 'fix_smig' ? 'SMIG' : 'CNSS'}:</strong> {fix.description}
+                        </div>
+                        <button onClick={() => handleApplySingleFix(fix)} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs hover:bg-blue-200">Appliquer</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {verifyResult.corrections?.length > 0 && (
                 <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-blue-700"><Wand2 size={12} className="inline mr-1" />{verifyResult.corrections.length} corrections proposées</span>
+                    <span className="text-xs font-medium text-blue-700"><Wand2 size={12} className="inline mr-1" />{verifyResult.corrections.length} corrections de calcul</span>
                     <button onClick={handleApplyCorrections} className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 flex items-center gap-1"><Wand2 size={12} />Appliquer</button>
                   </div>
                   <div className="space-y-1 max-h-40 overflow-y-auto">
