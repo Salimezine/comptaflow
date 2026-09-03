@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Upload, Download, CheckCircle, FileSpreadsheet, Calculator, Users, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Upload, Download, CheckCircle, FileSpreadsheet, Calculator, Users, ShieldCheck, AlertTriangle, Wand2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { parseFichePersonnel, Employee, PointageData } from '../../lib/baudParser';
 import { calculateSalary, SalaryResult } from '../../lib/baudCalculator';
+import { verifySalaryCalculations, applyCorrections, VerificationResult, CorrectionAction } from '../../lib/baudAI';
 import * as XLSX from 'xlsx';
 
 type Tab = 'navette' | 'employees' | 'controle' | 'calcul' | 'export';
@@ -219,19 +220,23 @@ export default function BaudDossierPage() {
     if (!dossier || employees.length === 0) return;
     setVerifying(true); setVerifyResult(null);
     try {
-      const salaryObj: Record<string, SalaryResult> = {};
-      salaryResults.forEach((v, k) => { salaryObj[k] = v; });
-
-      const BASE = import.meta.env.VITE_API_URL || 'https://eurex-api.ezzinesalim21.workers.dev/api';
-      const res = await fetch(`${BASE}/baud/dossiers/${dossier.id}/verify-ai`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ employees, pointage, salaryResults: salaryObj }),
-      });
-      const data = await res.json();
-      setVerifyResult(data);
-    } catch (e: any) { setVerifyResult({ verdict: 'ERREUR', error: e.message }); }
+      // Client-side AI verification
+      const result = verifySalaryCalculations(employees, pointage, salaryResults);
+      setVerifyResult(result);
+    } catch (e: any) { setVerifyResult({ verdict: 'ERREUR', error: e.message, checks: [], missing: [], anomalies: [], corrections: [], summary: { totalEmployees: 0, verified: 0, warnings: 0, errors: 0, corrected: 0 } }); }
     setVerifying(false);
+  };
+
+  const handleApplyCorrections = async () => {
+    if (!verifyResult || verifyResult.corrections.length === 0) return;
+    try {
+      const correctedResults = applyCorrections(employees, pointage, salaryResults, verifyResult.corrections);
+      setSalaryResults(correctedResults);
+      setMsg(`${verifyResult.corrections.length} corrections appliquées`);
+      // Re-verify after corrections
+      const newResult = verifySalaryCalculations(employees, pointage, correctedResults);
+      setVerifyResult(newResult);
+    } catch (e: any) { setMsg('Erreur: ' + e.message); }
   };
 
   if (!dossier) return <div className="mt-8 text-gray-400 text-sm">Chargement...</div>;
@@ -346,7 +351,7 @@ export default function BaudDossierPage() {
               <ShieldCheck size={20} className="text-blue-600" />
               <div>
                 <h3 className="font-medium text-sm">Verification IA</h3>
-                <p className="text-xs text-gray-400">Verifie les calculs, detecte les anomalies et les salaries manquants</p>
+                <p className="text-xs text-gray-400">Verifie les calculs, detecte les anomalies et propose des corrections</p>
               </div>
               <button onClick={handleVerifyAI} disabled={verifying || employees.length === 0}
                 className="ml-auto px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1">
@@ -362,10 +367,15 @@ export default function BaudDossierPage() {
                 <span className={`font-semibold ${verifyResult.verdict === 'OK' ? 'text-green-700' : verifyResult.verdict === 'ATTENTION' ? 'text-amber-700' : 'text-red-700'}`}>
                   {verifyResult.verdict}
                 </span>
+                {verifyResult.summary && (
+                  <span className="text-xs text-gray-500 ml-2">
+                    ({verifyResult.summary.verified}/{verifyResult.summary.totalEmployees} verifiés, {verifyResult.summary.warnings} avertissements, {verifyResult.summary.errors} erreurs)
+                  </span>
+                )}
               </div>
 
               {verifyResult.checks?.length > 0 && (
-                <div className="space-y-1 mb-3">
+                <div className="space-y-1 mb-3 max-h-64 overflow-y-auto">
                   {verifyResult.checks.map((c: any, i: number) => (
                     <div key={i} className={`flex items-start gap-2 text-xs ${c.status === 'error' ? 'text-red-600' : c.status === 'warning' ? 'text-amber-600' : 'text-green-600'}`}>
                       <span>{c.status === 'ok' ? '✓' : c.status === 'warning' ? '⚠' : '✗'}</span>
@@ -381,17 +391,32 @@ export default function BaudDossierPage() {
                 </div>
               )}
 
-              {verifyResult.changes?.length > 0 && (
+              {verifyResult.anomalies?.length > 0 && (
                 <div className="text-xs text-amber-600 mb-2">
-                  <strong>Modifications:</strong>
-                  <ul className="list-disc list-inside">{verifyResult.changes.map((c: string, i: number) => <li key={i}>{c}</li>)}</ul>
+                  <strong>Anomalies:</strong>
+                  <ul className="list-disc list-inside">{verifyResult.anomalies.map((a: string, i: number) => <li key={i}>{a}</li>)}</ul>
                 </div>
               )}
 
-              {verifyResult.anomalies?.length > 0 && (
-                <div className="text-xs text-red-600 mb-2">
-                  <strong>Anomalies:</strong>
-                  <ul className="list-disc list-inside">{verifyResult.anomalies.map((a: string, i: number) => <li key={i}>{a}</li>)}</ul>
+              {verifyResult.corrections?.length > 0 && (
+                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-blue-700">
+                      <Wand2 size={12} className="inline mr-1" />
+                      {verifyResult.corrections.length} corrections proposées
+                    </span>
+                    <button onClick={handleApplyCorrections}
+                      className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 flex items-center gap-1">
+                      <Wand2 size={12} />Appliquer les corrections
+                    </button>
+                  </div>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {verifyResult.corrections.map((c: CorrectionAction, i: number) => (
+                      <div key={i} className="text-xs text-blue-600">
+                        <strong>{c.nom}</strong>: {c.field} {c.oldValue} → {c.newValue} ({c.reason})
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
