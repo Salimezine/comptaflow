@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EUREX - Paramètres</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; padding: 20px; }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { color: #00d4ff; margin-bottom: 10px; }
+    .subtitle { color: #888; margin-bottom: 30px; }
+    .section { background: #16213e; border-radius: 10px; padding: 20px; margin-bottom: 20px; border: 1px solid #0f3460; }
+    .section h2 { color: #00d4ff; font-size: 16px; margin-bottom: 15px; border-bottom: 1px solid #0f3460; padding-bottom: 8px; }
+    .field { margin-bottom: 12px; }
+    .field label { display: block; color: #aaa; font-size: 13px; margin-bottom: 4px; }
+    .field input { width: 100%; padding: 8px 12px; background: #0f3460; border: 1px solid #1a1a5e; border-radius: 6px; color: #fff; font-size: 14px; }
+    .field input:focus { outline: none; border-color: #00d4ff; }
+    .field .hint { color: #666; font-size: 11px; margin-top: 2px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; margin-right: 10px; }
+    .btn-primary { background: #00d4ff; color: #000; font-weight: bold; }
+    .btn-primary:hover { background: #00b8d4; }
+    .btn-secondary { background: #333; color: #fff; }
+    .btn-secondary:hover { background: #444; }
+    .btn-success { background: #00c853; color: #000; font-weight: bold; }
+    .btn-success:hover { background: #00a844; }
+    .actions { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .status { margin-top: 10px; padding: 10px; border-radius: 6px; display: none; }
+    .status.success { background: #1b5e20; border: 1px solid #4caf50; display: block; }
+    .status.error { background: #b71c1c; border: 1px solid #f44336; display: block; }
+    .json-preview { background: #0a0a1a; border: 1px solid #333; border-radius: 6px; padding: 15px; font-family: monospace; font-size: 12px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; color: #0f0; margin-top: 15px; display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>EUREX - Paramètres</h1>
+    <p class="subtitle">Modifiez les paramètres et téléchargez le fichier config.json</p>
+
+    <div class="section">
+      <h2>Général</h2>
+      <div class="field">
+        <label>Chemin des factures</label>
+        <input type="text" id="basePath" value="D:\ANIMAL  CITY\EXERCICE\2026\VENTE">
+        <div class="hint">Dossier contenant les sous-dossiers des mois (01-2026, 02-2026, etc.)</div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>Dossier de sortie</label>
+          <input type="text" id="outputDir" value=".">
+          <div class="hint">Répertoire de sortie pour les CSV</div>
+        </div>
+        <div class="field">
+          <label>Seuil Écarts (dt)</label>
+          <input type="number" id="ecartsThreshold" value="3" step="0.1">
+          <div class="hint">Au-delà → tag "a verifier"</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Comptes</h2>
+      <div class="row">
+        <div class="field">
+          <label>Espèces (411)</label>
+          <input type="text" id="acc_especes" value="411004">
+        </div>
+        <div class="field">
+          <label>TPE (411)</label>
+          <input type="text" id="acc_tpe" value="411005">
+        </div>
+        <div class="field">
+          <label>Chèques (411)</label>
+          <input type="text" id="acc_cheques" value="411003">
+        </div>
+        <div class="field">
+          <label>Avoirs Financiers (709)</label>
+          <input type="text" id="acc_avoirFinancier" value="709500">
+        </div>
+        <div class="field">
+          <label>Ventes JC 0%</label>
+          <input type="text" id="acc_ventesJc0" value="707200">
+        </div>
+        <div class="field">
+          <label>Ventes JC 19%</label>
+          <input type="text" id="acc_ventesJc19" value="707219">
+        </div>
+        <div class="field">
+          <label>Ventes C 0%</label>
+          <input type="text" id="acc_ventesC0" value="707100">
+        </div>
+        <div class="field">
+          <label>Ventes C 19%</label>
+          <input type="text" id="acc_ventesC19" value="707119">
+        </div>
+        <div class="field">
+          <label>TVA JC</label>
+          <input type="text" id="acc_tvaJc" value="436711">
+        </div>
+        <div class="field">
+          <label>TVA C</label>
+          <input type="text" id="acc_tvaC" value="436710">
+        </div>
+        <div class="field">
+          <label>Timbre</label>
+          <input type="text" id="acc_timbre" value="437500">
+        </div>
+        <div class="field">
+          <label>Écarts</label>
+          <input type="text" id="acc_ecarts" value="634500">
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Libellés</h2>
+      <div class="row">
+        <div class="field">
+          <label>Espèces</label>
+          <input type="text" id="lib_especes" value="CLIENTS PASSAGERS ESPECES">
+        </div>
+        <div class="field">
+          <label>TPE</label>
+          <input type="text" id="lib_tpe" value="CLIENTS PASSAGERS TPE">
+        </div>
+        <div class="field">
+          <label>Chèques</label>
+          <input type="text" id="lib_cheques" value="CLIENTS PASSAGERS CHEQUES">
+        </div>
+        <div class="field">
+          <label>Avoirs Financiers</label>
+          <input type="text" id="lib_avoirFinancier" value="AVOIRS FINACIERS">
+        </div>
+        <div class="field">
+          <label>Ventes JC 0%</label>
+          <input type="text" id="lib_ventesJc0" value="VENTES MARCHANDISES J.C 0%">
+        </div>
+        <div class="field">
+          <label>Ventes JC 19%</label>
+          <input type="text" id="lib_ventesJc19" value="VENTES MARCHANDISES J.C 19%">
+        </div>
+        <div class="field">
+          <label>Ventes C 0%</label>
+          <input type="text" id="lib_ventesC0" value="VENTES MARCHANDISES C 0%">
+        </div>
+        <div class="field">
+          <label>Ventes C 19%</label>
+          <input type="text" id="lib_ventesC19" value="VENTES MARCHANDISES C 19%">
+        </div>
+        <div class="field">
+          <label>TVA JC</label>
+          <input type="text" id="lib_tvaJc" value="TVA COLLECTEE 19% J.C">
+        </div>
+        <div class="field">
+          <label>TVA C</label>
+          <input type="text" id="lib_tvaC" value="TVA COLLECTEE 19% C">
+        </div>
+        <div class="field">
+          <label>Timbre</label>
+          <input type="text" id="lib_timbre" value="TIMBRE FISCAL">
+        </div>
+        <div class="field">
+          <label>Écarts</label>
+          <input type="text" id="lib_ecarts" value="ECARTS DE REGLEMENT">
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Mois</h2>
+      <div class="row">
+        <div class="field">
+          <label>01-2026</label>
+          <input type="text" id="month_01" value="JANVIER">
+        </div>
+        <div class="field">
+          <label>02-2026</label>
+          <input type="text" id="month_02" value="FEVRIER">
+        </div>
+        <div class="field">
+          <label>03-2026</label>
+          <input type="text" id="month_03" value="MARS">
+        </div>
+        <div class="field">
+          <label>04-2026</label>
+          <input type="text" id="month_04" value="AVRIL">
+        </div>
+        <div class="field">
+          <label>05-2026</label>
+          <input type="text" id="month_05" value="MAI">
+        </div>
+        <div class="field">
+          <label>06-2026</label>
+          <input type="text" id="month_06" value="JUIN">
+        </div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" onclick="generateConfig()">Générer config.json</button>
+      <button class="btn btn-success" onclick="downloadConfig()">Télécharger config.json</button>
+      <button class="btn btn-secondary" onclick="previewJson()">Voir JSON</button>
+      <button class="btn btn-secondary" onclick="loadFromFile()">Charger un fichier</button>
+      <input type="file" id="fileInput" accept=".json" style="display:none" onchange="handleFile(event)">
+    </div>
+
+    <div id="status" class="status"></div>
+    <pre id="jsonPreview" class="json-preview"></pre>
+  </div>
+
+  <script>
+    function generateConfig() {
+      return {
+        basePath: document.getElementById('basePath').value,
+        outputDir: document.getElementById('outputDir').value,
+        ecartsThreshold: parseFloat(document.getElementById('ecartsThreshold').value),
+        accounts: {
+          especes: document.getElementById('acc_especes').value,
+          tpe: document.getElementById('acc_tpe').value,
+          cheques: document.getElementById('acc_cheques').value,
+          avoirFinancier: document.getElementById('acc_avoirFinancier').value,
+          ventesJc0: document.getElementById('acc_ventesJc0').value,
+          ventesJc19: document.getElementById('acc_ventesJc19').value,
+          ventesC0: document.getElementById('acc_ventesC0').value,
+          ventesC19: document.getElementById('acc_ventesC19').value,
+          tvaJc: document.getElementById('acc_tvaJc').value,
+          tvaC: document.getElementById('acc_tvaC').value,
+          timbre: document.getElementById('acc_timbre').value,
+          ecarts: document.getElementById('acc_ecarts').value
+        },
+        libelles: {
+          especes: document.getElementById('lib_especes').value,
+          tpe: document.getElementById('lib_tpe').value,
+          cheques: document.getElementById('lib_cheques').value,
+          avoirFinancier: document.getElementById('lib_avoirFinancier').value,
+          ventesJc0: document.getElementById('lib_ventesJc0').value,
+          ventesJc19: document.getElementById('lib_ventesJc19').value,
+          ventesC0: document.getElementById('lib_ventesC0').value,
+          ventesC19: document.getElementById('lib_ventesC19').value,
+          tvaJc: document.getElementById('lib_tvaJc').value,
+          tvaC: document.getElementById('lib_tvaC').value,
+          timbre: document.getElementById('lib_timbre').value,
+          ecarts: document.getElementById('lib_ecarts').value
+        },
+        months: {
+          '01-2026': document.getElementById('month_01').value,
+          '02-2026': document.getElementById('month_02').value,
+          '03-2026': document.getElementById('month_03').value,
+          '04-2026': document.getElementById('month_04').value,
+          '05-2026': document.getElementById('month_05').value,
+          '06-2026': document.getElementById('month_06').value
+        }
+      };
+    }
+
+    function downloadConfig() {
+      const config = generateConfig();
+      const json = JSON.stringify(config, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'config.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      showStatus('config.json téléchargé ! Copiez-le dans le dossier du script.', 'success');
+    }
+
+    function previewJson() {
+      const config = generateConfig();
+      const preview = document.getElementById('jsonPreview');
+      preview.textContent = JSON.stringify(config, null, 2);
+      preview.style.display = preview.style.display === 'block' ? 'none' : 'block';
+    }
+
+    function loadFromFile() {
+      document.getElementById('fileInput').click();
+    }
+
+    function handleFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const config = JSON.parse(e.target.result);
+          document.getElementById('basePath').value = config.basePath || '';
+          document.getElementById('outputDir').value = config.outputDir || '.';
+          document.getElementById('ecartsThreshold').value = config.ecartsThreshold || 3;
+          
+          if (config.accounts) {
+            document.getElementById('acc_especes').value = config.accounts.especes || '';
+            document.getElementById('acc_tpe').value = config.accounts.tpe || '';
+            document.getElementById('acc_cheques').value = config.accounts.cheques || '';
+            document.getElementById('acc_avoirFinancier').value = config.accounts.avoirFinancier || '';
+            document.getElementById('acc_ventesJc0').value = config.accounts.ventesJc0 || '';
+            document.getElementById('acc_ventesJc19').value = config.accounts.ventesJc19 || '';
+            document.getElementById('acc_ventesC0').value = config.accounts.ventesC0 || '';
+            document.getElementById('acc_ventesC19').value = config.accounts.ventesC19 || '';
+            document.getElementById('acc_tvaJc').value = config.accounts.tvaJc || '';
+            document.getElementById('acc_tvaC').value = config.accounts.tvaC || '';
+            document.getElementById('acc_timbre').value = config.accounts.timbre || '';
+            document.getElementById('acc_ecarts').value = config.accounts.ecarts || '';
+          }
+          
+          if (config.libelles) {
+            document.getElementById('lib_especes').value = config.libelles.especes || '';
+            document.getElementById('lib_tpe').value = config.libelles.tpe || '';
+            document.getElementById('lib_cheques').value = config.libelles.cheques || '';
+            document.getElementById('lib_avoirFinancier').value = config.libelles.avoirFinancier || '';
+            document.getElementById('lib_ventesJc0').value = config.libelles.ventesJc0 || '';
+            document.getElementById('lib_ventesJc19').value = config.libelles.ventesJc19 || '';
+            document.getElementById('lib_ventesC0').value = config.libelles.ventesC0 || '';
+            document.getElementById('lib_ventesC19').value = config.libelles.ventesC19 || '';
+            document.getElementById('lib_tvaJc').value = config.libelles.tvaJc || '';
+            document.getElementById('lib_tvaC').value = config.libelles.tvaC || '';
+            document.getElementById('lib_timbre').value = config.libelles.timbre || '';
+            document.getElementById('lib_ecarts').value = config.libelles.ecarts || '';
+          }
+          
+          if (config.months) {
+            document.getElementById('month_01').value = config.months['01-2026'] || '';
+            document.getElementById('month_02').value = config.months['02-2026'] || '';
+            document.getElementById('month_03').value = config.months['03-2026'] || '';
+            document.getElementById('month_04').value = config.months['04-2026'] || '';
+            document.getElementById('month_05').value = config.months['05-2026'] || '';
+            document.getElementById('month_06').value = config.months['06-2026'] || '';
+          }
+          
+          showStatus('Fichier chargé avec succès !', 'success');
+        } catch (err) {
+          showStatus('Erreur: ' + err.message, 'error');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function showStatus(msg, type) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = 'status ' + type;
+      setTimeout(() => el.style.display = 'none', 5000);
+      el.style.display = 'block';
+    }
+  </script>
+</body>
+</html>
