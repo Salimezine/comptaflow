@@ -26,6 +26,7 @@ export interface Employee {
   date_sortie: string;
   date_recrutement: string;
   transport_plein: number; // Montant plein selon barème (92.800 ou 100.533)
+  heures_nuit: number; // Nombre d'heures de nuit par mois (saisie manuelle)
 }
 
 export interface PointageData {
@@ -193,6 +194,8 @@ export function parseFichePersonnel(workbook: any, filename: string): ParsedFich
         date_recrutement: cleanStr(row[DP_COLUMNS.date_recrutement]),
         // Transport plein par défaut selon fonction (barème STE BAUD)
         transport_plein: getTransportPlein(cleanStr(row[DP_COLUMNS.fonction])),
+        // Heures de nuit — saisie manuelle (pas dans le fichier Excel)
+        heures_nuit: 0,
       });
     }
   }

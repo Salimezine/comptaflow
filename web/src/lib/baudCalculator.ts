@@ -53,6 +53,8 @@ export interface SalaryInput {
   prime_lait_plein?: number; // Lait plein (défaut: 29.700 DT)
   prime_logement_plein?: number; // Logement plein (défaut: 26.293 DT)
   prime_nuit_plein?: number; // Nuit plein (fixe par salarié, pas de formule horaire)
+  // Heures de nuit — saisie manuelle (calcul: taux_horaire × heures_nuit × 1.25)
+  heures_nuit?: number; // Nombre d'heures de nuit travaillées dans le mois
   // Augmentation — montants fixes DT par salarié, SANS revalorisation décret 68
   // Uniquement coefficient_presence appliqué
   augmentation_2025?: number; // Augmentation 2025 (rubrique 4100)
@@ -327,6 +329,7 @@ export function calculateSalary(input: SalaryInput): SalaryResult {
     prime_lait_plein,
     prime_logement_plein,
     prime_nuit_plein: prime_nuit_plein_input,
+    heures_nuit = 0,
     augmentation_2025 = 0,
     augmentation_2026 = 0,
     // Champs legacy
@@ -411,10 +414,19 @@ export function calculateSalary(input: SalaryInput): SalaryResult {
   const prime_logement = Math.round((prime_logement_plein ?? prime_logement_legacy ?? PRIME_LOGEMENT_PLEIN) * coefficient_presence * 1000) / 1000;
 
   // =====================================================================
-  // 9. NUIT — plein × coefficient (fixe par salarié, pas de calcul horaire)
+  // 9. NUIT — heures_nuit × taux_horaire × 1.25 (majoration légale 25%)
+  //     OU fixe × coefficient (fallback si pas d'heures renseignées)
   // =====================================================================
-  const prime_nuit_plein = prime_nuit_plein_input ?? prime_nuit_legacy ?? 0;
-  const prime_nuit = Math.round(prime_nuit_plein * coefficient_presence * 1000) / 1000;
+  let prime_nuit: number;
+  if (heures_nuit > 0) {
+    // Formule horaire : taux_horaire = base / (47.5h × 4 semaines) = base / 190
+    const taux_horaire = salaire_de_base / 190;
+    prime_nuit = Math.round(taux_horaire * heures_nuit * 1.25 * 1000) / 1000;
+  } else {
+    // Fallback : montant fixe par salarié × coefficient présence
+    const prime_nuit_plein = prime_nuit_plein_input ?? prime_nuit_legacy ?? 0;
+    prime_nuit = Math.round(prime_nuit_plein * coefficient_presence * 1000) / 1000;
+  }
 
   // =====================================================================
   // 10. AUGMENTATION — fixe × coefficient (PAS de revalorisation décret 68)

@@ -31,6 +31,8 @@ export default function BaudDossierPage() {
   const [editingEmployee, setEditingEmployee] = useState<string | null>(null);
   const [editingPointage, setEditingPointage] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<any>({});
+  // Heures de nuit par employé (saisie manuelle)
+  const [heuresNuit, setHeuresNuit] = useState<Record<string, number>>({});
 
   // Export control
   const [sageExportResult, setSageExportResult] = useState<SageExportResult | null>(null);
@@ -88,17 +90,18 @@ export default function BaudDossierPage() {
       let brut = emp.nouveau_salaire_brut > 0 ? emp.nouveau_salaire_brut : emp.salaire_brut;
       if (absences > 0) brut = Math.round(brut * (22 - absences) / 22 * 1000) / 1000;
       const hs = parseFloat(ptg?.heures_supplementaires || '') || 0;
-      const result = calculateSalary({
-        salaire_brut: brut,
-        situation_fam: emp.situation_fam,
-        nombre_enfants: emp.nombre_enfants,
-        absences_jours: absences,
-        heures_supplementaires: hs,
-        avances,
-        date_recrutement: emp.date_recrutement,
-        mois: dossier?.mois || 1,
-        annee: dossier?.annee || 2026,
-      });
+        const result = calculateSalary({
+          salaire_brut: brut,
+          situation_fam: emp.situation_fam,
+          nombre_enfants: emp.nombre_enfants,
+          absences_jours: absences,
+          heures_supplementaires: hs,
+          avances,
+          date_recrutement: emp.date_recrutement,
+          mois: dossier?.mois || 1,
+          annee: dossier?.annee || 2026,
+          heures_nuit: heuresNuit[emp.matricule] || emp.heures_nuit || 0,
+        });
       results.set(emp.matricule, result);
     }
     setSalaryResults(results);
@@ -321,7 +324,7 @@ export default function BaudDossierPage() {
                     <th className="p-2">Mat</th><th className="p-2">Nom</th><th className="p-2">Prenom</th>
                     <th className="p-2">CIN</th><th className="p-2">CNSS</th><th className="p-2">SF</th><th className="p-2">NE</th>
                     <th className="p-2">Embauche</th><th className="p-2">Fonction</th><th className="p-2">Contrat</th>
-                    <th className="p-2 text-right">Brut</th><th className="p-2">Actions</th>
+                    <th className="p-2 text-right">Brut</th><th className="p-2 text-right">H.Nuit</th><th className="p-2">Actions</th>
                   </tr></thead>
                   <tbody className="divide-y">
                     {employees.map((emp) => (
@@ -357,6 +360,17 @@ export default function BaudDossierPage() {
                             <td className="p-2 text-xs">{emp.type_contrat}</td>
                             <td className="p-2 text-xs text-gray-500">{emp.date_recrutement || '-'}</td>
                             <td className="p-2 text-right font-mono text-xs">{emp.salaire_brut.toFixed(3)}</td>
+                            <td className="p-1">
+                              <input type="number" step="1" min="0"
+                                value={heuresNuit[emp.matricule] || emp.heures_nuit || ''}
+                                onChange={e => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setHeuresNuit(prev => ({ ...prev, [emp.matricule]: val }));
+                                }}
+                                placeholder="0"
+                                className="w-16 text-xs border rounded px-1 text-right"
+                                title="Heures de nuit (taux_horaire × 1.25)" />
+                            </td>
                             <td className="p-1">
                               <button onClick={() => startEditEmployee(emp)} className="p-1 text-blue-600 hover:text-blue-800"><Edit2 size={14} /></button>
                             </td>

@@ -56,6 +56,28 @@ describe('CNSS — 9.68% plafond 5000 DT', () => {
 });
 
 // ============================================================================
+// 2b. NUIT — heures_nuit × taux_horaire × 1.25
+// ============================================================================
+describe('Nuit — calcul horaire', () => {
+  it('nuit = taux_horaire × heures × 1.25 quand heures_nuit > 0', () => {
+    const r = calculateSalary({ salaire_brut: 1000, situation_fam: 'C', nombre_enfants: 0, heures_nuit: 8 });
+    const expectedTaux = 1000 / 190;
+    const expectedNuit = Math.round(expectedTaux * 8 * 1.25 * 1000) / 1000;
+    expect(r.prime_nuit).toBe(expectedNuit);
+  });
+
+  it('nuit = 0 quand heures_nuit = 0 et pas de plein', () => {
+    const r = calculateSalary({ salaire_brut: 1000, situation_fam: 'C', nombre_enfants: 0 });
+    expect(r.prime_nuit).toBe(0);
+  });
+
+  it('nuit = fixe × coefficient en fallback (legacy)', () => {
+    const r = calculateSalary({ salaire_brut: 1000, situation_fam: 'C', nombre_enfants: 0, prime_nuit_plein: 50 });
+    expect(r.prime_nuit).toBe(50); // coefficient = 1.0 (mois complet)
+  });
+});
+
+// ============================================================================
 // 3. IRPP — Bareme annuel 8 tranches
 // ============================================================================
 describe('IRPP — bareme annuel', () => {
@@ -298,12 +320,12 @@ describe('Validation DALY SONDES juin 2026', () => {
 // ============================================================================
 describe('Integration — tous les mois et tous les salaries', () => {
   const testEmployees = [
-    { matricule: '209070', nom: 'DALY', prenom: 'SONDES', situation_fam: 'C' as const, nombre_enfants: 0, date_recrutement: '2020-01-01', salaire_brut: 592.928, nouveau_salaire_brut: 592.928, transport_plein: 95.002 },
-    { matricule: '209071', nom: 'ROUHI', prenom: 'Nabil', situation_fam: 'M' as const, nombre_enfants: 2, date_recrutement: '2018-06-01', salaire_brut: 800, nouveau_salaire_brut: 800, transport_plein: 100.533 },
-    { matricule: '209072', nom: 'BACCOUCHE', prenom: 'Tahar', situation_fam: 'M' as const, nombre_enfants: 3, date_recrutement: '2015-03-01', salaire_brut: 750, nouveau_salaire_brut: 750, transport_plein: 92.800 },
-    { matricule: '209073', nom: 'ZAYANI', prenom: 'Majed', situation_fam: 'C' as const, nombre_enfants: 0, date_recrutement: '2022-09-01', salaire_brut: 650, nouveau_salaire_brut: 650, transport_plein: 95.002 },
-    { matricule: '209074', nom: 'BEN SLIMENE', prenom: 'Karim', situation_fam: 'M' as const, nombre_enfants: 1, date_recrutement: '2010-01-01', salaire_brut: 400, nouveau_salaire_brut: 400, transport_plein: 92.800 },
-    { matricule: '209075', nom: 'AAMRI', prenom: 'Moatez', situation_fam: 'C' as const, nombre_enfants: 0, date_recrutement: '2023-06-01', salaire_brut: 6008.771, nouveau_salaire_brut: 6008.771, transport_plein: 100.533 },
+    { matricule: '209070', nom: 'DALY', prenom: 'SONDES', situation_fam: 'C' as const, nombre_enfants: 0, date_recrutement: '2020-01-01', salaire_brut: 592.928, nouveau_salaire_brut: 592.928, transport_plein: 95.002, heures_nuit: 0 },
+    { matricule: '209071', nom: 'ROUHI', prenom: 'Nabil', situation_fam: 'M' as const, nombre_enfants: 2, date_recrutement: '2018-06-01', salaire_brut: 800, nouveau_salaire_brut: 800, transport_plein: 100.533, heures_nuit: 0 },
+    { matricule: '209072', nom: 'BACCOUCHE', prenom: 'Tahar', situation_fam: 'M' as const, nombre_enfants: 3, date_recrutement: '2015-03-01', salaire_brut: 750, nouveau_salaire_brut: 750, transport_plein: 92.800, heures_nuit: 0 },
+    { matricule: '209073', nom: 'ZAYANI', prenom: 'Majed', situation_fam: 'C' as const, nombre_enfants: 0, date_recrutement: '2022-09-01', salaire_brut: 650, nouveau_salaire_brut: 650, transport_plein: 95.002, heures_nuit: 0 },
+    { matricule: '209074', nom: 'BEN SLIMENE', prenom: 'Karim', situation_fam: 'M' as const, nombre_enfants: 1, date_recrutement: '2010-01-01', salaire_brut: 400, nouveau_salaire_brut: 400, transport_plein: 92.800, heures_nuit: 0 },
+    { matricule: '209075', nom: 'AAMRI', prenom: 'Moatez', situation_fam: 'C' as const, nombre_enfants: 0, date_recrutement: '2023-06-01', salaire_brut: 6008.771, nouveau_salaire_brut: 6008.771, transport_plein: 100.533, heures_nuit: 0 },
   ];
 
   const mois = [1, 2, 3, 4, 5, 6, 7, 8];
