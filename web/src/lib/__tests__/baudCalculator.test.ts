@@ -285,12 +285,12 @@ describe('Integration — tous les mois et tous les salaries', () => {
   // Donnees simulees pour tous les mois (8 mois, salaires representatifs)
   // Inclut: celibataire, marie, bas salaire, haut salaire, anciennete variable
   const testEmployees = [
-    { matricule: '209070', nom: 'DALY', prenom: 'SONDES', situation_fam: 'C', nombre_enfants: 0, date_recrutement: '2020-01-01', salaire_brut: 592.928, nouveau_salaire_brut: 592.928 },
-    { matricule: '209071', nom: 'ROUHI', prenom: 'Nabil', situation_fam: 'M', nombre_enfants: 2, date_recrutement: '2018-06-01', salaire_brut: 800, nouveau_salaire_brut: 800 },
-    { matricule: '209072', nom: 'BACCOUCHE', prenom: 'Tahar', situation_fam: 'M', nombre_enfants: 3, date_recrutement: '2015-03-01', salaire_brut: 750, nouveau_salaire_brut: 750 },
-    { matricule: '209073', nom: 'ZAYANI', prenom: 'Majed', situation_fam: 'C', nombre_enfants: 0, date_recrutement: '2022-09-01', salaire_brut: 650, nouveau_salaire_brut: 650 },
-    { matricule: '209074', nom: 'BEN SLIMENE', prenom: 'Karim', situation_fam: 'M', nombre_enfants: 1, date_recrutement: '2010-01-01', salaire_brut: 400, nouveau_salaire_brut: 400 },
-    { matricule: '209075', nom: 'AAMRI', prenom: 'Moatez', situation_fam: 'C', nombre_enfants: 0, date_recrutement: '2023-06-01', salaire_brut: 6008.771, nouveau_salaire_brut: 6008.771 },
+    { matricule: '209070', nom: 'DALY', prenom: 'SONDES', situation_fam: 'C' as const, nombre_enfants: 0, date_recrutement: '2020-01-01', salaire_brut: 592.928, nouveau_salaire_brut: 592.928, cin: '12345678', date_naissance: '1985-01-01' },
+    { matricule: '209071', nom: 'ROUHI', prenom: 'Nabil', situation_fam: 'M' as const, nombre_enfants: 2, date_recrutement: '2018-06-01', salaire_brut: 800, nouveau_salaire_brut: 800, cin: '23456789', date_naissance: '1988-03-15' },
+    { matricule: '209072', nom: 'BACCOUCHE', prenom: 'Tahar', situation_fam: 'M' as const, nombre_enfants: 3, date_recrutement: '2015-03-01', salaire_brut: 750, nouveau_salaire_brut: 750, cin: '34567890', date_naissance: '1980-07-20' },
+    { matricule: '209073', nom: 'ZAYANI', prenom: 'Majed', situation_fam: 'C' as const, nombre_enfants: 0, date_recrutement: '2022-09-01', salaire_brut: 650, nouveau_salaire_brut: 650, cin: '45678901', date_naissance: '1992-11-10' },
+    { matricule: '209074', nom: 'BEN SLIMENE', prenom: 'Karim', situation_fam: 'M' as const, nombre_enfants: 1, date_recrutement: '2010-01-01', salaire_brut: 400, nouveau_salaire_brut: 400, cin: '56789012', date_naissance: '1975-05-25' },
+    { matricule: '209075', nom: 'AAMRI', prenom: 'Moatez', situation_fam: 'C' as const, nombre_enfants: 0, date_recrutement: '2023-06-01', salaire_brut: 6008.771, nouveau_salaire_brut: 6008.771, cin: '67890123', date_naissance: '1995-09-30' },
   ];
 
   const mois = [1, 2, 3, 4, 5, 6, 7, 8];
