@@ -88,7 +88,6 @@ export default function BaudDossierPage() {
       const absences = parseInt(ptg?.absences || '') || 0;
       const avances = ptg?.avances || 0;
       let brut = emp.nouveau_salaire_brut > 0 ? emp.nouveau_salaire_brut : emp.salaire_brut;
-      if (absences > 0) brut = Math.round(brut * (22 - absences) / 22 * 1000) / 1000;
       const hs = parseFloat(ptg?.heures_supplementaires || '') || 0;
         const result = calculateSalary({
           salaire_brut: brut,

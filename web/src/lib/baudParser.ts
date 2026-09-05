@@ -73,13 +73,14 @@ const DP_COLUMNS: Record<string, number> = {
 };
 
 const POINTAGE_COLUMNS: Record<string, number> = {
-  matricule: 0,
-  nom: 2,
-  prenom: 3,
-  absences: 4,
-  avances: 5,
-  conges_payes: 6,
-  heures_sup: 7,
+  matricule: 1,      // Col B: Mat
+  nom: 2,            // Col C: NOM
+  prenom: 3,         // Col D: Prénom
+  absences: 4,       // Col E: ABSENCES
+  telephone: 5,      // Col F: Telephone à réduire (ignoré)
+  avances: 6,        // Col G: AVANCES
+  conges_payes: 7,   // Col H: CONGES PAYES
+  heures_sup: 8,     // Col I: HEURES SUPPLEMENTAIRES
 };
 
 function cleanStr(v: any): string {
