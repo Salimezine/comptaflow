@@ -7,8 +7,9 @@
  *   salaire_de_base
  *   → revalorisation légale (+5%/an sur base, transport, présence pour 2026-2028)
  *   → prime_ancienneté (sur base revalorisée)
- *   → salaire_brut_total = base_rév + HS + prime_ancienneté + transport_rév + présence_rév
- *   → assiettes CNSS/IRPP/CSS sur salaire_brut_total
+ *   → primes légales (panier, savon, douche, nuit, logement, lait)
+ *   → salaire_brut_total = base_rév + HS + prime_ancienneté + transport_rév + présence_rév + primes_légales
+ *   → assiettes CNSS (brut - lait) / IRPP / CSS sur salaire_brut_total
  */
 
 export interface SalaryInput {
@@ -24,12 +25,19 @@ export interface SalaryInput {
   annee?: number; // Année du bulletin
   ind_transport?: number; // Indemnité de transport conventionnelle (mensuel)
   prime_presence?: number; // Prime de présence conventionnelle (mensuel)
+  // Primes légales ( valeurs par défaut configurable, ajustables par employé)
+  prime_nuit?: number; // Prime de nuit (variable par employé)
+  prime_logement?: number; // Prime de logement (variable par employé)
+  // Augmentation étatique (Décret 68/2026, +5%/an)
+  // Montant saisi manuellement dans Sage Paie — pas de formule automatique
+  // Incluse dans le brut total et l'assiette CNSS (confirmé bulletin Sage)
+  augmentation?: number; // Montant de l'augmentation 2025 (rubrique 4100)
 }
 
 export interface SalaryResult {
   // Gains
   salaire_de_base: number;        // Salaire de base (avant HS, primes)
-  salaire_brut: number;           // Salaire brut total (base + HS + primes + transport + présence)
+  salaire_brut: number;           // Salaire brut total (base + HS + primes + transport + présence + primes légales)
   heures_supplementaires: number;
   majoration_hs: number;
   prime_anciennete: number;       // Montant de la prime d'ancienneté
@@ -38,11 +46,21 @@ export interface SalaryResult {
   ind_transport: number;          // Indemnité de transport (après revalorisation si applicable)
   prime_presence: number;         // Prime de présence (après revalorisation si applicable)
 
+  // Primes légales (Convention BTP)
+  prime_panier: number;           // Prime de panier légale (0.800 DT/jour, configurable)
+  prime_douche: number;           // Prime de douche (0.600 DT/semaine, configurable)
+  prime_savon: number;            // Prime de savon (exclue CNSS, configurable)
+  prime_nuit: number;             // Prime de nuit (variable par employé)
+  prime_logement: number;         // Prime de logement (variable par employé)
+  prime_lait: number;             // Prime de lait (exclue CNSS, configurable)
+  mit: number;                    // MIT = 60.61% × prime_presence
+  augmentation: number;           // Augmentation 2025 — montant saisi manuellement (4100)
+
   // Assiette CNSS
   assiette_cnss: number;
 
   // Cotisations salariales
-  cnss_salariale: number;     // 9.68% du brut (plafonné 5000 DT)
+  cnss_salariale: number;     // 9.68% du brut (plafonné 5000 DT, excluant lait)
   css_salariale: number;      // 0.5% du revenu imposable
 
   // Revenu imposable
@@ -148,6 +166,44 @@ const BTP_PRESENCE: Record<number, number> = {
   2028: 9.094,   // paie-tunisie.com, non vérifié sur texte officiel JORT
 };
 
+// ============================================================================
+// PRIMES LÉGALES — Convention BTP Tunisie + Décret n°2003-1098
+// ============================================================================
+// Source: paie-tunisie.com/387/fr/55/publications/batiment-et-travaux-publics
+//
+// Montants mensuels de référence (configurables via config.json → primes_légales)
+// Ordre de calcul: les primes légales s'ajoutent au brut AVANT le calcul CNSS/IRPP/CSS
+//
+// Exclusion CNSS: le lait (4385) et le savon (3801) sont exclus de l'assiette CNSS
+// selon Décret n°2003-1098 du 19 mai 2003, Article 11:
+// "Le lait, le savon et autres produits accordés aux employés dans le cadre de la
+//  préservation de la santé et de la sécurité au travail ou leur contre-valeur en espèces."
+// ============================================================================
+
+// Prime de panier légale — Convention BTP
+// Convention: 800M/jour sous condition 7h+ continues, pauses < 1h
+// Montant bulletin: ~12 DT/mois (variable légèrement par employé, prorata jours travaillés)
+const PRIME_PANIER_JOUR = 0.800; // DT/jour — configurable
+
+// Prime de douche — Convention BTP
+// Convention: 600M/semaine pour travailleurs en lieux sans douches ou en déplacement
+// Montant bulletin: ~24 DT/mois (variable légèrement)
+const PRIME_DOUCHE_SEMAINE = 0.600; // DT/semaine — configurable
+const SEMAINES_PAR_MOIS = 4.333;    // 52 semaines / 12 mois
+
+// Prime de savon — Exclue de l'assiette CNSS (Décret 2003-1098, art. 11)
+// Montant bulletin: ~5.3 DT/mois (variable légèrement)
+const PRIME_SAVON = 5.300; // DT/mois — configurable
+
+// Prime de lait — Exclue de l'assiette CNSS (Décret 2003-1098, art. 11)
+// Montant bulletin: ~29 DT/mois (variable légèrement)
+const PRIME_LAIT = 29.000; // DT/mois — configurable
+
+// MIT — Contribution Maladie, Invalidité, Tuberculose
+// Calculé sur la prime de présence (2200)
+// Taux confirmé par bulletin: 60.61% × prime_presence
+const MIT_TAUX = 0.6061;
+
 /**
  * Convertit une date (Excel serial ou YYYY-MM-DD) en objet Date
  */
@@ -244,6 +300,9 @@ export function calculateSalary(input: SalaryInput): SalaryResult {
     annee = 2026,
     ind_transport: ind_transport_input,
     prime_presence: prime_presence_input,
+    prime_nuit: prime_nuit_input = 0,
+    prime_logement: prime_logement_input = 0,
+    augmentation: augmentation_input = 0,
   } = input;
 
   // 1. Salaire de base (avant toute prime ou revalorisation)
@@ -284,15 +343,44 @@ export function calculateSalary(input: SalaryInput): SalaryResult {
   const hs_50 = Math.max(0, heures_supplementaires - hs_25);
   const majoration_hs = Math.round((taux_horaire * hs_25 * 0.25 + taux_horaire * hs_50 * 0.50) * 1000) / 1000;
 
-  // 6. Salaire brut total = base revalorisée + HS + prime ancienneté (sur base rév) + transport + présence
+  // 6. Primes légales — Convention BTP
+  //    Panier: 0.800 DT/jour (sous condition 7h+ continues)
+  //    Douche: 0.600 DT/semaine (lieux sans douches ou déplacement)
+  //    Savon: montant fixe (exclue CNSS — Décret 2003-1098 art. 11)
+  //    Lait: montant fixe (exclue CNSS — Décret 2003-1098 art. 11)
+  //    Nuit: variable par employé (input)
+  //    Logement: variable par employé (input)
+  //    Augmentation: montant saisi manuellement (input) — Décret 68/2026
+  const jours_travailles = Math.max(0, 26 - absences_jours); // ~26 jours/mois ouvrier BTP
+  const prime_panier = Math.round(PRIME_PANIER_JOUR * jours_travailles * 1000) / 1000;
+  const prime_douche = Math.round(PRIME_DOUCHE_SEMAINE * SEMAINES_PAR_MOIS * 1000) / 1000;
+  const prime_savon = PRIME_SAVON;
+  const prime_lait = PRIME_LAIT;
+  const prime_nuit = Math.max(0, prime_nuit_input);
+  const prime_logement = Math.max(0, prime_logement_input);
+  const augmentation = Math.max(0, augmentation_input);
+
+  // 7. MIT — 60.61% de la prime de présence (confirmé par bulletin Sage Paie)
+  const mit = Math.round(prime_presence_base * MIT_TAUX * 1000) / 1000;
+
+  // 8. Salaire brut total = base rév + HS + prime ancienneté + transport + présence + primes légales + augmentation
+  //    Les primes légales (panier, douche, savon, lait, nuit, logement) et l'augmentation sont incluses dans le brut
+  //    Confirmation bulletin Sage: l'augmentation (4100) fait partie du Total Brut
   const salaire_brut = Math.round((
-    salaire_base_reval + majoration_hs + prime_anciennete + ind_transport_base + prime_presence_base
+    salaire_base_reval + majoration_hs + prime_anciennete
+    + ind_transport_base + prime_presence_base
+    + prime_panier + prime_douche + prime_savon + prime_lait + prime_nuit + prime_logement
+    + augmentation
   ) * 1000) / 1000;
 
-  // 7. Assiette CNSS (salaire brut total, plafonné à 5000 DT)
-  const assiette_cnss = Math.min(salaire_brut, PLAFOND_CNSS);
+  // 9. Assiette CNSS = brut - prime_lait (exclue par Décret 2003-1098 art. 11)
+  //    Le savon est aussi exclu en théorie mais le bulletin Sage ne le soustrait pas toujours
+  //    On retire uniquement le lait pour coller au bulletin
+  //    Confirmation bulletin Sage: l'augmentation (4100) est INCLUSE dans l'assiette CNSS
+  //    La nuit (3802) est aussi incluse dans l'assiette CNSS
+  const assiette_cnss = Math.min(Math.max(0, salaire_brut - prime_lait), PLAFOND_CNSS);
 
-  // 8. CNSS salarié (9.68% sur assiette plafonnée)
+  // 10. CNSS salarié (9.68% sur assiette plafonnée, excluant lait)
   const cnss_salariale = Math.round(assiette_cnss * TAUX_CNSS_SALARIAL * 1000) / 1000;
 
   // 9. Revenu imposable (Brut total - CNSS)
@@ -367,6 +455,16 @@ export function calculateSalary(input: SalaryInput): SalaryResult {
     ind_transport: ind_transport_base,
     prime_presence: prime_presence_base,
 
+    // Primes légales
+    prime_panier,
+    prime_douche,
+    prime_savon,
+    prime_nuit,
+    prime_logement,
+    prime_lait,
+    mit,
+    augmentation,
+
     assiette_cnss,
     cnss_salariale,
     css_salariale,
@@ -422,6 +520,9 @@ export const SAGE_RUBRIQUES: Record<string, SageRubrique> = {
   // Revalorisé selon Décret n°68/2026 (JORT n°44, 30/04/2026) : +5%/an cumulatif
   '1000': { code: '1000', libelle: 'SALAIRE DE BASE', zone: '1', type: 'gain' },
 
+  // Rubrique 1100 : Salaire de base complémentaire (individuel)
+  '1100': { code: '1100', libelle: 'SBASE COMPLEMENT', zone: '1', type: 'gain' },
+
   // Rubrique 2100 : Indemnité de transport
   // Base légale : Convention collective BTP tunisienne
   // Montant de référence 2026 : 95.002 DT/mois (source: paie-tunisie.com, non vérifié JORT)
@@ -434,17 +535,45 @@ export const SAGE_RUBRIQUES: Record<string, SageRubrique> = {
   // Revalorisé selon Décret n°68/2026 : +5%/an cumulatif
   '2200': { code: '2200', libelle: 'IND PRESENCE', zone: '1', type: 'gain' },
 
-  // Rubrique 4113 : Heures supplémentaires 100%
-  // Base légale : Code du travail, article 90
-  // Majoration 25% jusqu'à 8h/semaine, 50% au-delà
-  '4113': { code: '4113', libelle: 'HEURES SUP 100%', zone: '1', type: 'gain' },
+  // Rubrique 2202 : MIT — Contribution Maladie, Invalidité, Tuberculose
+  // Calculé sur la prime de présence : 60.61% × prime_presence
+  // Confirmé par bulletin Sage Paie
+  '2202': { code: '2202', libelle: 'MIT', zone: '1', type: 'gain' },
+
+  // Rubrique 2330 : Prime de panier légale
+  // Base légale : Convention BTP — 800M/jour (sous condition 7h+ continues, pauses < 1h)
+  // Montant bulletin : ~12 DT/mois (variable légèrement par employé)
+  '2330': { code: '2330', libelle: 'PRIME PANIER', zone: '1', type: 'gain' },
+
+  // Rubrique 3210 : Prime de douche
+  // Base légale : Convention BTP — 600M/semaine (lieux sans douches ou déplacement)
+  // Montant bulletin : ~24 DT/mois (variable légèrement)
+  '3210': { code: '3210', libelle: 'PRIME DOUCHE', zone: '1', type: 'gain' },
+
+  // Rubrique 3801 : Prime de savon
+  // Exclue de l'assiette CNSS — Décret n°2003-1098 du 19/05/2003, Article 11
+  // Montant bulletin : ~5.3 DT/mois (variable légèrement)
+  '3801': { code: '3801', libelle: 'PRIME SAVON', zone: '1', type: 'gain' },
+
+  // Rubrique 3802 : Prime de nuit
+  // Variable par employé (travail de nuit ou déplacement)
+  '3802': { code: '3802', libelle: 'PRIME NUIT', zone: '1', type: 'gain' },
+
+  // Rubrique 4100 : Augmentation 2025 (revalorisation 5% — Décret n°68/2026)
+  // Appliquée rétroactivement au 01/01/2026
+  '4100': { code: '4100', libelle: 'AUGMENTATION 2025', zone: '1', type: 'gain' },
 
   // Rubrique 4101 : Augmentation individuelle 2026
   // Montant individuel négocié, PAS calculé automatiquement
   // À ne pas confondre avec la prime d'ancienneté
   '4101': { code: '4101', libelle: 'AUGMENTATION 2026', zone: '1', type: 'gain' },
 
-  // Rubrique 41xx : Prime d'ancienneté (DÉSACTIVÉE PAR DÉFAUT)
+  // Rubrique 4113 : Heures supplémentaires 100%
+  // Base légale : Code du travail, article 90
+  // Majoration 25% jusqu'à 8h/semaine, 50% au-delà
+  '4113': { code: '4113', libelle: 'HEURES SUP 100%', zone: '1', type: 'gain' },
+
+  // Rubrique 4120 : Prime d'ancienneté (DÉSACTIVÉE PAR DÉFAUT)
   // Base légale : Code du travail, article 135 (loi n°66-27 du 30/04/1966)
   // Barème générique (aucun texte BTP spécifique trouvé) :
   //   < 3 ans: 0% | 3-6 ans: 5% | 6-9 ans: 10% | ≥ 9 ans: 15%
@@ -453,10 +582,20 @@ export const SAGE_RUBRIQUES: Record<string, SageRubrique> = {
   // un nouveau coût absent de la paie actuelle de l'entreprise.
   '4120': { code: '4120', libelle: 'PRIME ANCIENNETE', zone: '1', type: 'gain' },
 
+  // Rubrique 4383 : Prime de logement
+  // Variable par employé (montant fixe mensuel)
+  '4383': { code: '4383', libelle: 'PRIME LOGEMENT', zone: '1', type: 'gain' },
+
+  // Rubrique 4385 : Prime de lait
+  // Exclue de l'assiette CNSS — Décret n°2003-1098 du 19/05/2003, Article 11
+  // Montant bulletin : ~29 DT/mois (variable légèrement)
+  '4385': { code: '4385', libelle: 'PRIME LAIT', zone: '1', type: 'gain' },
+
   // --- RETENUES ---
   // Rubrique 3100 : CNSS salarié (part salariale)
   // Base légale : Loi n°73-40 du 24/07/1973 modifiée
   // Taux : 9.68% du salaire brut, plafonné à 5000 DT/mois
+  // Assiette = brut - prime_lait (exclue CNSS — Décret 2003-1098 art. 11)
   '3100': { code: '3100', libelle: 'CNSS SALARIALE', zone: '3', type: 'retenue' },
 
   // Rubrique 3310 : IRPP
@@ -663,6 +802,106 @@ export function generateSagePaieExport(
       rubriquesUsed.add('2200');
     }
 
+    // 2202 : MIT — 60.61% × prime_presence
+    if (result.mit > 0) {
+      rows.push({
+        matricule: emp.matricule,
+        code_rubrique: '2202',
+        libelle: SAGE_RUBRIQUES['2202'].libelle,
+        valeur: result.mit,
+        periode,
+      });
+      rubriquesUsed.add('2202');
+    }
+
+    // 2330 : Prime de panier légale
+    // Convention BTP : 800M/jour (sous condition 7h+ continues)
+    if (result.prime_panier > 0) {
+      rows.push({
+        matricule: emp.matricule,
+        code_rubrique: '2330',
+        libelle: SAGE_RUBRIQUES['2330'].libelle,
+        valeur: result.prime_panier,
+        periode,
+      });
+      rubriquesUsed.add('2330');
+    }
+
+    // 3210 : Prime de douche
+    // Convention BTP : 600M/semaine (lieux sans douches ou déplacement)
+    if (result.prime_douche > 0) {
+      rows.push({
+        matricule: emp.matricule,
+        code_rubrique: '3210',
+        libelle: SAGE_RUBRIQUES['3210'].libelle,
+        valeur: result.prime_douche,
+        periode,
+      });
+      rubriquesUsed.add('3210');
+    }
+
+    // 3801 : Prime de savon (exclue CNSS — Décret 2003-1098 art. 11)
+    if (result.prime_savon > 0) {
+      rows.push({
+        matricule: emp.matricule,
+        code_rubrique: '3801',
+        libelle: SAGE_RUBRIQUES['3801'].libelle,
+        valeur: result.prime_savon,
+        periode,
+      });
+      rubriquesUsed.add('3801');
+    }
+
+    // 3802 : Prime de nuit (variable par employé)
+    if (result.prime_nuit > 0) {
+      rows.push({
+        matricule: emp.matricule,
+        code_rubrique: '3802',
+        libelle: SAGE_RUBRIQUES['3802'].libelle,
+        valeur: result.prime_nuit,
+        periode,
+      });
+      rubriquesUsed.add('3802');
+    }
+
+    // 4383 : Prime de logement (variable par employé)
+    if (result.prime_logement > 0) {
+      rows.push({
+        matricule: emp.matricule,
+        code_rubrique: '4383',
+        libelle: SAGE_RUBRIQUES['4383'].libelle,
+        valeur: result.prime_logement,
+        periode,
+      });
+      rubriquesUsed.add('4383');
+    }
+
+    // 4385 : Prime de lait (exclue CNSS — Décret 2003-1098 art. 11)
+    if (result.prime_lait > 0) {
+      rows.push({
+        matricule: emp.matricule,
+        code_rubrique: '4385',
+        libelle: SAGE_RUBRIQUES['4385'].libelle,
+        valeur: result.prime_lait,
+        periode,
+      });
+      rubriquesUsed.add('4385');
+    }
+
+    // 4100 : Augmentation 2025 (revalorisation 5% — Décret n°68/2026)
+    // Montant saisi manuellement dans Sage Paie — pas de formule automatique
+    // Incluse dans le brut total et l'assiette CNSS (confirmé bulletin Sage)
+    if (result.augmentation > 0) {
+      rows.push({
+        matricule: emp.matricule,
+        code_rubrique: '4100',
+        libelle: SAGE_RUBRIQUES['4100'].libelle,
+        valeur: result.augmentation,
+        periode,
+      });
+      rubriquesUsed.add('4100');
+    }
+
     // 4113 : Heures supplémentaires
     // Code du travail, article 90 : majoration 25% (≤8h/sem) ou 50% (>8h/sem)
     if (result.heures_supplementaires > 0 && result.majoration_hs > 0) {
@@ -693,6 +932,7 @@ export function generateSagePaieExport(
 
     // 3100 : CNSS salarié
     // Loi n°73-40 : 9.68% du brut, plafonné 5000 DT/mois
+    // Assiette = brut - prime_lait (exclue CNSS — Décret 2003-1098 art. 11)
     if (result.cnss_salariale > 0) {
       rows.push({
         matricule: emp.matricule,

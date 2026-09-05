@@ -201,7 +201,9 @@ function verifyEmployee(
   }
 
   // 2. CNSS — Loi n73-40 : 9.68% du brut, plafond 5000 DT
-  const expectedCNSS = Math.round(Math.min(result.salaire_brut, CONSTANTS.PLAFOND_CNSS) * CONSTANTS.CNSS_SALARIAL * 1000) / 1000;
+  //    Assiette = brut - prime_lait (exclue CNSS — Décret 2003-1098 art. 11)
+  const assietteCNSS = Math.min(Math.max(0, result.salaire_brut - result.prime_lait), CONSTANTS.PLAFOND_CNSS);
+  const expectedCNSS = Math.round(assietteCNSS * CONSTANTS.CNSS_SALARIAL * 1000) / 1000;
   if (Math.abs(result.cnss_salariale - expectedCNSS) > 0.01) {
     checks.push({
       name: 'CNSS incorrect',
@@ -437,6 +439,7 @@ function verifyTotals(
   let totalIRPP = 0;
   let totalCSS = 0;
   let totalNet = 0;
+  let totalLait = 0;
 
   for (const emp of employees) {
     const result = salaryResults.get(emp.matricule);
@@ -446,9 +449,13 @@ function verifyTotals(
     totalIRPP += result.irpp;
     totalCSS += result.css_salariale;
     totalNet += result.salaire_net;
+    totalLait += result.prime_lait;
   }
 
-  const cnssRatio = totalCNSS / totalBrut;
+  // CNSS est calculé sur (brut - lait), pas sur brut directement
+  // Décret 2003-1098 art. 11 : lait exclu de l'assiette CNSS
+  const assietteTotale = totalBrut - totalLait;
+  const cnssRatio = assietteTotale > 0 ? totalCNSS / assietteTotale : 0;
   const irppRatio = totalIRPP / totalBrut;
 
   if (Math.abs(cnssRatio - CONSTANTS.CNSS_SALARIAL) > 0.02) {

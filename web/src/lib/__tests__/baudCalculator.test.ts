@@ -36,10 +36,10 @@ describe('SMIG — Decret 67/2026', () => {
 // 2. CNSS — Loi n73-40 (9.68%, plafond 5000 DT)
 // ============================================================================
 describe('CNSS — 9.68% plafond 5000 DT', () => {
-  it('CNSS sur brut < plafond', () => {
+  it('CNSS sur brut < plafond (excluant lait)', () => {
     const r = calculateSalary({ salaire_brut: 1000, situation_fam: 'C', nombre_enfants: 0 });
-    // Brut = 1000 + transport(95.002) + presence(8.248) = 1103.25
-    const expectedCNSS = Math.round(Math.min(r.salaire_brut, 5000) * 0.0968 * 1000) / 1000;
+    // Assiette CNSS = brut - lait(29.000), plafonné 5000
+    const expectedCNSS = Math.round(Math.min(Math.max(0, r.salaire_brut - 29.000), 5000) * 0.0968 * 1000) / 1000;
     expect(r.cnss_salariale).toBe(expectedCNSS);
   });
 
@@ -135,7 +135,7 @@ describe('applyRevalorisation', () => {
 // 8. Calcul salaire — ordre correct
 // ============================================================================
 describe('Calcul salaire — ordre des operations', () => {
-  it('brut = base_rev + HS + prime_anc + transport_rev + presence_rev', () => {
+  it('brut = base_rev + HS + prime_anc + transport_rev + presence_rev + primes_légales', () => {
     const r = calculateSalary({
       salaire_brut: 1000, situation_fam: 'C', nombre_enfants: 0,
       date_recrutement: '2020-01-01', mois: 6, annee: 2026,
@@ -144,7 +144,9 @@ describe('Calcul salaire — ordre des operations', () => {
     expect(r.prime_anciennete).toBe(100);
     expect(r.ind_transport).toBe(95.002);
     expect(r.prime_presence).toBe(8.248);
-    expect(r.salaire_brut).toBe(Math.round((1000 + 0 + 100 + 95.002 + 8.248) * 1000) / 1000);
+    // Brut inclut maintenant les primes légales (panier, douche, savon, lait)
+    expect(r.salaire_brut).toBe(Math.round((1000 + 0 + 100 + 95.002 + 8.248
+      + r.prime_panier + r.prime_douche + r.prime_savon + r.prime_lait) * 1000) / 1000);
   });
 
   it('2028 : prime sur base revalORISEE', () => {
@@ -259,12 +261,13 @@ describe('Validation DALY SONDES juin 2026', () => {
     expect(r.prime_anciennete).toBe(Math.round(592.928 * 10 / 100 * 1000) / 1000);
   });
 
-  it('CNSS correct', () => {
+  it('CNSS correct (excluant lait)', () => {
     const r = calculateSalary({
       salaire_brut: 592.928, situation_fam: 'C', nombre_enfants: 0,
       date_recrutement: '2020-01-01', mois: 6, annee: 2026,
     });
-    expect(r.cnss_salariale).toBe(Math.round(Math.min(r.salaire_brut, 5000) * 0.0968 * 1000) / 1000);
+    // Assiette CNSS = brut - lait(29.000), plafonné 5000
+    expect(r.cnss_salariale).toBe(Math.round(Math.min(Math.max(0, r.salaire_brut - 29.000), 5000) * 0.0968 * 1000) / 1000);
   });
 
   it('IRPP detail coherent', () => {
@@ -320,8 +323,8 @@ describe('Integration — tous les mois et tous les salaries', () => {
         expect(r.salaire_net).toBeGreaterThanOrEqual(0);
         expect(r.net_a_payer).toBeGreaterThanOrEqual(0);
 
-        // CNSS = 9.68% du brut plafonne 5000
-        const expectedCNSS = Math.round(Math.min(r.salaire_brut, 5000) * 0.0968 * 1000) / 1000;
+        // CNSS = 9.68% du brut plafonne 5000 (excluant lait — Décret 2003-1098 art. 11)
+        const expectedCNSS = Math.round(Math.min(Math.max(0, r.salaire_brut - 29.000), 5000) * 0.0968 * 1000) / 1000;
         expect(r.cnss_salariale).toBe(expectedCNSS);
 
         // CSS = 0.5% du revenu net imposable
@@ -448,5 +451,126 @@ describe('Revalorisation progressive 2026-2028', () => {
     // 2028 a des valeurs BTP : 104.740 transport, 9.094 présence
     expect(r.ind_transport).toBe(104.740);
     expect(r.prime_presence).toBe(9.094);
+  });
+});
+
+// ============================================================================
+// 14. Primes légales — Convention BTP
+// ============================================================================
+describe('Primes légales — Convention BTP', () => {
+  it('panier = 0.800 × jours travaillés (26 - absences)', () => {
+    const r = calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026, absences_jours: 2 });
+    // 26 - 2 = 24 jours × 0.800 = 19.200
+    expect(r.prime_panier).toBe(Math.round(0.800 * 24 * 1000) / 1000);
+  });
+
+  it('douche = 0.600 × 4.333 semaines/mois', () => {
+    const r = calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026 });
+    expect(r.prime_douche).toBe(Math.round(0.600 * 4.333 * 1000) / 1000);
+  });
+
+  it('savon = 5.300 DT/mois (constant)', () => {
+    const r = calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026 });
+    expect(r.prime_savon).toBe(5.300);
+  });
+
+  it('lait = 29.000 DT/mois (constant)', () => {
+    const r = calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026 });
+    expect(r.prime_lait).toBe(29.000);
+  });
+
+  it('nuit = input employé (0 si non renseigné)', () => {
+    const r1 = calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026 });
+    expect(r1.prime_nuit).toBe(0);
+    const r2 = calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026, prime_nuit: 70 });
+    expect(r2.prime_nuit).toBe(70);
+  });
+
+  it('logement = input employé (0 si non renseigné)', () => {
+    const r1 = calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026 });
+    expect(r1.prime_logement).toBe(0);
+    const r2 = calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026, prime_logement: 25 });
+    expect(r2.prime_logement).toBe(25);
+  });
+
+  it('MIT = 60.61% × prime_presence', () => {
+    const r = calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026 });
+    // presence = 8.248, MIT = 8.248 × 0.6061
+    expect(r.mit).toBe(Math.round(8.248 * 0.6061 * 1000) / 1000);
+  });
+
+  it('CNSS exclut lait de l\'assiette (Décret 2003-1098 art. 11)', () => {
+    const r = calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026 });
+    // brut inclut lait (29.000), assiette CNSS = brut - lait
+    const expectedAssiette = Math.min(Math.max(0, r.salaire_brut - 29.000), 5000);
+    expect(r.assiette_cnss).toBe(expectedAssiette);
+    expect(r.cnss_salariale).toBe(Math.round(expectedAssiette * 0.0968 * 1000) / 1000);
+  });
+
+  it('brut inclut toutes les primes légales', () => {
+    const r = calculateSalary({
+      salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026,
+      prime_nuit: 70, prime_logement: 25,
+    });
+    // brut = base + transport + presence + panier + douche + savon + lait + nuit + logement
+    const expectedBrut = Math.round((
+      600 + 95.002 + 8.248
+      + Math.round(0.800 * 26 * 1000) / 1000
+      + Math.round(0.600 * 4.333 * 1000) / 1000
+      + 5.300 + 29.000 + 70 + 25
+    ) * 1000) / 1000;
+    expect(r.salaire_brut).toBe(expectedBrut);
+  });
+
+  it('augmentation = input employé (0 si non renseigné)', () => {
+    const r1 = calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026 });
+    expect(r1.augmentation).toBe(0);
+    const r2 = calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026, augmentation: 200 });
+    expect(r2.augmentation).toBe(200);
+  });
+
+  it('augmentation incluse dans le brut total', () => {
+    const r = calculateSalary({
+      salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026,
+      augmentation: 200,
+    });
+    // brut inclut augmentation
+    const expectedBrut = Math.round((
+      600 + 95.002 + 8.248
+      + Math.round(0.800 * 26 * 1000) / 1000
+      + Math.round(0.600 * 4.333 * 1000) / 1000
+      + 5.300 + 29.000 + 0 + 0 + 200
+    ) * 1000) / 1000;
+    expect(r.salaire_brut).toBe(expectedBrut);
+  });
+
+  it('augmentation incluse dans assiette CNSS', () => {
+    const r = calculateSalary({
+      salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026,
+      augmentation: 200,
+    });
+    // assiette CNSS = brut - lait (augmentation est dans le brut)
+    const expectedAssiette = Math.min(Math.max(0, r.salaire_brut - 29.000), 5000);
+    expect(r.assiette_cnss).toBe(expectedAssiette);
+    expect(r.cnss_salariale).toBe(Math.round(expectedAssiette * 0.0968 * 1000) / 1000);
+  });
+
+  it('export Sage inclut rubrique 4100 quand augmentation > 0', () => {
+    const employees = [{ matricule: 'T1', nom: 'TEST', prenom: 'Aug', nouveau_salaire_brut: 600, salaire_brut: 600 }];
+    const results = new Map<string, SalaryResult>();
+    results.set('T1', calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026, augmentation: 200 }));
+    const e = generateSagePaieExport(employees, [], results, 6, 2026, false);
+    const augRows = e.rows.filter(r => r.code_rubrique === '4100');
+    expect(augRows.length).toBe(1);
+    expect(augRows[0].valeur).toBe(200);
+  });
+
+  it('export Sage n\'inclut pas 4100 quand augmentation = 0', () => {
+    const employees = [{ matricule: 'T1', nom: 'TEST', prenom: 'NoAug', nouveau_salaire_brut: 600, salaire_brut: 600 }];
+    const results = new Map<string, SalaryResult>();
+    results.set('T1', calculateSalary({ salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026 }));
+    const e = generateSagePaieExport(employees, [], results, 6, 2026, false);
+    const augRows = e.rows.filter(r => r.code_rubrique === '4100');
+    expect(augRows.length).toBe(0);
   });
 });
