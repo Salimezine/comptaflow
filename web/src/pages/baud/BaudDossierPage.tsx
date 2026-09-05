@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Upload, Download, CheckCircle, FileSpreadsheet, Calculator, Users, ShieldCheck, AlertTriangle, Wand2, Save, Edit2, X, Plus, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { parseFichePersonnel, Employee, PointageData } from '../../lib/baudParser';
-import { calculateSalary, SalaryResult } from '../../lib/baudCalculator';
+import { calculateSalary, SalaryResult, generateSagePaieExport, SageExportResult } from '../../lib/baudCalculator';
 import { verifySalaryCalculations, applyCorrections, applyAutoFixes, VerificationResult, CorrectionAction, AutoFixAction } from '../../lib/baudAI';
 import * as XLSX from 'xlsx';
 
@@ -31,6 +31,10 @@ export default function BaudDossierPage() {
   const [editingEmployee, setEditingEmployee] = useState<string | null>(null);
   const [editingPointage, setEditingPointage] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<any>({});
+
+  // Export control
+  const [sageExportResult, setSageExportResult] = useState<SageExportResult | null>(null);
+  const [showControlReport, setShowControlReport] = useState(false);
 
   const load = async () => {
     if (!id) return;
@@ -83,7 +87,18 @@ export default function BaudDossierPage() {
       const avances = ptg?.avances || 0;
       let brut = emp.nouveau_salaire_brut > 0 ? emp.nouveau_salaire_brut : emp.salaire_brut;
       if (absences > 0) brut = Math.round(brut * (22 - absences) / 22 * 1000) / 1000;
-      const result = calculateSalary({ salaire_brut: brut, situation_fam: emp.situation_fam, nombre_enfants: emp.nombre_enfants, absences_jours: absences, avances });
+      const hs = parseFloat(ptg?.heures_supplementaires || '') || 0;
+      const result = calculateSalary({
+        salaire_brut: brut,
+        situation_fam: emp.situation_fam,
+        nombre_enfants: emp.nombre_enfants,
+        absences_jours: absences,
+        heures_supplementaires: hs,
+        avances,
+        date_recrutement: emp.date_recrutement,
+        mois: dossier?.mois || 1,
+        annee: dossier?.annee || 2026,
+      });
       results.set(emp.matricule, result);
     }
     setSalaryResults(results);
@@ -95,34 +110,60 @@ export default function BaudDossierPage() {
     if (!dossier || salaryResults.size === 0) { setMsg('Calculez d\'abord les salaires'); return; }
     setGenerating(true); setMsg('');
     try {
-      const salRows: any[][] = [['Matricule', 'Nom', 'Prenom', 'Civilité', 'Date de naissance', 'Date d\'embauche', 'Poste', 'Type de contrat', 'Situation familiale', 'Nombre enfants', 'CNSS', 'RIB', 'Salaire base']];
-      const varRows: any[][] = [['Matricule', 'Rubrique ou Constante', 'Zone', 'Valeur']];
-      for (const emp of employees) {
-        const result = salaryResults.get(emp.matricule);
-        if (!result) continue;
-        salRows.push([emp.matricule, emp.nom, emp.prenom, '', emp.date_naissance, emp.date_recrutement, emp.fonction, emp.type_contrat, emp.situation_fam, emp.nombre_enfants, emp.numero_cnss, emp.rib_ou_ccp, result.salaire_brut]);
-        varRows.push([emp.matricule, 'SBASE', '1', result.salaire_brut]);
-        if (result.cnss_salariale > 0) varRows.push([emp.matricule, 'CSSAL', '3', result.cnss_salariale]);
-        if (result.irpp > 0) varRows.push([emp.matricule, 'IRPP', '3', result.irpp]);
-        if (result.css_salariale > 0) varRows.push([emp.matricule, 'CSS', '3', result.css_salariale]);
-        const ptg = pointage.find(p => p.matricule === emp.matricule || p.nom === emp.nom);
-        if (ptg) {
-          if (ptg.avances > 0) varRows.push([emp.matricule, 'AVANCE', '3', ptg.avances]);
-          if (ptg.absences) { const absJours = parseInt(ptg.absences) || 0; if (absJours > 0) varRows.push([emp.matricule, 'ABSENCE', '0', absJours]); }
-          if (ptg.conges_payes) { const cpJours = parseInt(ptg.conges_payes) || 0; if (cpJours > 0) varRows.push([emp.matricule, 'CP', '0', cpJours]); }
-          if (ptg.heures_supplementaires) { const hs = parseFloat(ptg.heures_supplementaires) || 0; if (hs > 0) varRows.push([emp.matricule, 'HSUP', '0', hs]); }
-        }
+      // Générer le rapport de contrôle et les lignes Sage
+      const exportResult = generateSagePaieExport(
+        employees,
+        pointage,
+        salaryResults,
+        dossier.mois || 1,
+        dossier.annee || 2026,
+        false // prime_anciennete.enabled = false par défaut
+      );
+      setSageExportResult(exportResult);
+
+      // Si des erreurs SMIG existent, bloquer l'export
+      if (exportResult.smigViolations.length > 0) {
+        setShowControlReport(true);
+        setMsg(`ERREUR : ${exportResult.smigViolations.length} salaire(s) < SMIG — corriger avant export`);
+        setGenerating(false);
+        return;
       }
+
+      // Générer le fichier Excel format Sage Paie 100 (format long)
       const moisStr = String(dossier.mois).padStart(2, '0');
       const annStr = String(dossier.annee).slice(-2);
-      const salWb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(salWb, XLSX.utils.aoa_to_sheet(salRows), 'Salariés');
-      const salB64 = XLSX.write(salWb, { type: 'base64', bookType: 'xlsx' });
-      const varWb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(varWb, XLSX.utils.aoa_to_sheet(varRows), 'Variables');
+      const periode = `${moisStr}/${dossier.annee}`;
+
+      // En-tête : Matricule | Code Rubrique | Libellé | Valeur | Période
+      const varRows: any[][] = [['Matricule', 'Code Rubrique', 'Libellé', 'Valeur', 'Période']];
+      for (const row of exportResult.rows) {
+        varRows.push([row.matricule, row.code_rubrique, row.libelle, row.valeur, row.periode]);
+      }
+
+      const varWb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(varWb, XLSX.utils.aoa_to_sheet(varRows), 'Variables Paie');
       const varB64 = XLSX.write(varWb, { type: 'base64', bookType: 'xlsx' });
-      const downloadB64 = (b64: string, filename: string) => { const binary = atob(b64); const bytes = new Uint8Array(binary.length); for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i); const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url); };
-      downloadB64(salB64, `ImportSalaries_${moisStr}-${annStr}.xlsx`);
-      setTimeout(() => downloadB64(varB64, `ImportVariables_${moisStr}-${annStr}.xlsx`), 500);
-      setMsg(`${salRows.length - 1} salaries + ${varRows.length - 1} variables exportes`);
+
+      const downloadB64 = (b64: string, filename: string) => {
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      downloadB64(varB64, `SagePaie100_${moisStr}-${annStr}.xlsx`);
+
+      const msgLines = [
+        `${exportResult.summary.totalRows} lignes exportées`,
+        `${exportResult.summary.totalEmployees} salariés`,
+        `Rubriques: ${exportResult.summary.rubriquesGenerated.join(', ')}`,
+      ];
+      if (exportResult.summary.warnings > 0) msgLines.push(`${exportResult.summary.warnings} avertissements`);
+      setMsg(msgLines.join(' | '));
     } catch (e: any) { setMsg('Erreur: ' + e.message); }
     setGenerating(false);
   };
@@ -279,7 +320,7 @@ export default function BaudDossierPage() {
                   <thead><tr className="text-left text-xs text-gray-500 border-b bg-gray-50">
                     <th className="p-2">Mat</th><th className="p-2">Nom</th><th className="p-2">Prenom</th>
                     <th className="p-2">CIN</th><th className="p-2">CNSS</th><th className="p-2">SF</th><th className="p-2">NE</th>
-                    <th className="p-2">Fonction</th><th className="p-2">Contrat</th>
+                    <th className="p-2">Embauche</th><th className="p-2">Fonction</th><th className="p-2">Contrat</th>
                     <th className="p-2 text-right">Brut</th><th className="p-2">Actions</th>
                   </tr></thead>
                   <tbody className="divide-y">
@@ -296,6 +337,7 @@ export default function BaudDossierPage() {
                             <td className="p-1"><input type="number" value={editValues.nombre_enfants} onChange={e => setEditValues({...editValues, nombre_enfants: parseInt(e.target.value) || 0})} className="w-12 text-xs border rounded px-1" /></td>
                             <td className="p-1"><input value={editValues.fonction} onChange={e => setEditValues({...editValues, fonction: e.target.value})} className="w-24 text-xs border rounded px-1" /></td>
                             <td className="p-1"><input value={editValues.type_contrat} onChange={e => setEditValues({...editValues, type_contrat: e.target.value})} className="w-16 text-xs border rounded px-1" /></td>
+                            <td className="p-1"><input value={editValues.date_recrutement || ''} onChange={e => setEditValues({...editValues, date_recrutement: e.target.value})} className="w-20 text-xs border rounded px-1" placeholder="YYYY-MM-DD" /></td>
                             <td className="p-1"><input type="number" step="0.001" value={editValues.salaire_brut} onChange={e => setEditValues({...editValues, salaire_brut: parseFloat(e.target.value) || 0})} className="w-24 text-xs border rounded px-1 text-right" /></td>
                             <td className="p-1 flex gap-1">
                               <button onClick={saveEditEmployee} className="p-1 text-green-600 hover:text-green-800"><Save size={14} /></button>
@@ -313,6 +355,7 @@ export default function BaudDossierPage() {
                             <td className="p-2 text-xs text-center">{emp.nombre_enfants}</td>
                             <td className="p-2 text-xs">{emp.fonction}</td>
                             <td className="p-2 text-xs">{emp.type_contrat}</td>
+                            <td className="p-2 text-xs text-gray-500">{emp.date_recrutement || '-'}</td>
                             <td className="p-2 text-right font-mono text-xs">{emp.salaire_brut.toFixed(3)}</td>
                             <td className="p-1">
                               <button onClick={() => startEditEmployee(emp)} className="p-1 text-blue-600 hover:text-blue-800"><Edit2 size={14} /></button>
@@ -428,12 +471,18 @@ export default function BaudDossierPage() {
               <div className="bg-white border rounded-lg overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead><tr className="text-left text-xs text-gray-500 border-b bg-gray-50">
-                    <th className="p-2">Mat</th><th className="p-2">Nom</th><th className="p-2 text-right">Brut</th><th className="p-2 text-right">CNSS</th><th className="p-2 text-right">IRPP</th><th className="p-2 text-right">CSS</th><th className="p-2 text-right">Net</th><th className="p-2 text-right">Net a payer</th>
+                    <th className="p-2">Mat</th><th className="p-2">Nom</th><th className="p-2 text-right">Base</th>
+                    <th className="p-2 text-right">Anc</th><th className="p-2 text-right">Transport</th><th className="p-2 text-right">Presence</th>
+                    <th className="p-2 text-right">Brut</th><th className="p-2 text-right">CNSS</th><th className="p-2 text-right">IRPP</th><th className="p-2 text-right">CSS</th><th className="p-2 text-right">Net</th><th className="p-2 text-right">Net a payer</th>
                   </tr></thead>
                   <tbody className="divide-y">
                     {employees.map(emp => { const r = salaryResults.get(emp.matricule); if (!r) return null; return (
                       <tr key={emp.matricule} className="hover:bg-gray-50">
                         <td className="p-2 font-mono text-xs">{emp.matricule}</td><td className="p-2 text-xs">{emp.nom} {emp.prenom}</td>
+                        <td className="p-2 text-right font-mono text-xs">{r.salaire_de_base.toFixed(3)}</td>
+                        <td className="p-2 text-right font-mono text-xs text-purple-600">{r.prime_anciennete > 0 ? `${r.prime_anciennete.toFixed(3)} (${r.taux_anciennete}%)` : '-'}</td>
+                        <td className="p-2 text-right font-mono text-xs text-blue-600">{r.ind_transport > 0 ? r.ind_transport.toFixed(3) : '-'}</td>
+                        <td className="p-2 text-right font-mono text-xs text-blue-600">{r.prime_presence > 0 ? r.prime_presence.toFixed(3) : '-'}</td>
                         <td className="p-2 text-right font-mono text-xs">{r.salaire_brut.toFixed(3)}</td><td className="p-2 text-right font-mono text-xs text-red-600">{r.cnss_salariale.toFixed(3)}</td>
                         <td className="p-2 text-right font-mono text-xs text-red-600">{r.irpp.toFixed(3)}</td><td className="p-2 text-right font-mono text-xs text-red-600">{r.css_salariale.toFixed(3)}</td>
                         <td className="p-2 text-right font-mono text-xs">{r.salaire_net.toFixed(3)}</td><td className="p-2 text-right font-mono text-xs font-bold text-green-700">{r.net_a_payer.toFixed(3)}</td>
@@ -450,21 +499,82 @@ export default function BaudDossierPage() {
       {/* TAB: EXPORT */}
       {tab === 'export' && (
         <div className="space-y-4">
-          <button onClick={generateSageExport} disabled={generating || salaryResults.size === 0} className="px-4 py-2 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 disabled:opacity-50">{generating ? 'Generation...' : 'Generer fichiers Sage Paie 100'}</button>
+          <div className="bg-white border rounded-lg p-4 space-y-3">
+            <div className="flex items-center gap-3">
+              <FileSpreadsheet size={20} className="text-purple-600" />
+              <div>
+                <h3 className="font-medium text-sm">Export Sage Paie 100</h3>
+                <p className="text-xs text-gray-400">Format "long" : 1 ligne / salarié / rubrique</p>
+              </div>
+              <button onClick={generateSageExport} disabled={generating || salaryResults.size === 0} className="ml-auto px-4 py-2 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1">
+                {generating ? 'Generation...' : 'Generer + Exporter'}
+              </button>
+            </div>
+            <div className="text-xs text-gray-400 space-y-1">
+              <p><strong>Rubriques :</strong> 1000 (Base), 2100 (Transport), 2200 (Présence), 4113 (HS), 3100 (CNSS), 3310 (IRPP), 3320 (CSS), 5100 (Alloc)</p>
+              <p><strong>Prime ancienneté :</strong> désactivée par défaut (flag à activer dans config.json si besoin)</p>
+              <p className="text-amber-500">⚠ Un import Sage ne peut pas être annulé. Vérifiez le rapport de contrôle ci-dessous.</p>
+            </div>
+          </div>
+
+          {/* Rapport de contrôle */}
+          {sageExportResult && (
+            <div className={`rounded-lg border p-4 ${sageExportResult.smigViolations.length > 0 ? 'bg-red-50 border-red-200' : sageExportResult.summary.warnings > 0 ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'}`}>
+              <div className="flex items-center gap-2 mb-3">
+                {sageExportResult.smigViolations.length > 0 ? <AlertTriangle size={18} className="text-red-600" /> : <CheckCircle size={18} className="text-green-600" />}
+                <span className={`font-semibold text-sm ${sageExportResult.smigViolations.length > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                  Rapport de contrôle
+                </span>
+                <button onClick={() => setShowControlReport(!showControlReport)} className="ml-auto text-xs text-blue-600 hover:underline">
+                  {showControlReport ? 'Masquer' : 'Détails'}
+                </button>
+              </div>
+
+              {/* Résumé */}
+              <div className="grid grid-cols-4 gap-2 mb-3 text-xs">
+                <div className="text-center"><div className="font-bold text-lg">{sageExportResult.summary.totalRows}</div><div className="text-gray-500">Lignes</div></div>
+                <div className="text-center"><div className="font-bold text-lg">{sageExportResult.summary.totalEmployees}</div><div className="text-gray-500">Salariés</div></div>
+                <div className="text-center"><div className="font-bold text-lg text-green-600">{sageExportResult.summary.rubriquesGenerated.length}</div><div className="text-gray-500">Rubriques</div></div>
+                <div className="text-center"><div className={`font-bold text-lg ${sageExportResult.smigViolations.length > 0 ? 'text-red-600' : 'text-green-600'}`}>{sageExportResult.smigViolations.length}</div><div className="text-gray-500">SMIG viol.</div></div>
+              </div>
+
+              {/* Violations SMIG — BLOQUANT */}
+              {sageExportResult.smigViolations.length > 0 && (
+                <div className="bg-red-100 border border-red-300 rounded p-3 mb-3">
+                  <p className="text-xs font-bold text-red-700 mb-2">⚠ BLOQUANT : Salaires inférieurs au SMIG (Décret n°67/2026)</p>
+                  {sageExportResult.smigViolations.map((v, i) => (
+                    <p key={i} className="text-xs text-red-600">• {v.nom} ({v.matricule}) : Brut {v.brut.toFixed(3)} DT &lt; SMIG {v.smig} DT</p>
+                  ))}
+                </div>
+              )}
+
+              {/* Détail du rapport */}
+              {showControlReport && sageExportResult.controlReport.length > 0 && (
+                <div className="space-y-1 max-h-64 overflow-y-auto">
+                  {sageExportResult.controlReport.map((item, i) => (
+                    <div key={i} className={`flex items-start gap-2 text-xs ${item.type === 'error' ? 'text-red-600' : item.type === 'warning' ? 'text-amber-600' : 'text-green-600'}`}>
+                      <span>{item.type === 'error' ? '✗' : item.type === 'warning' ? '⚠' : '✓'}</span>
+                      <span><strong>{item.nom} {item.prenom}:</strong> {item.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {exports.length > 0 && (
             <div className="bg-white border rounded-lg p-4">
-              <h3 className="font-medium text-sm mb-3">Fichiers generes</h3>
+              <h3 className="font-medium text-sm mb-3">Fichiers générés</h3>
               <div className="space-y-2">
                 {exports.map((exp: any) => (
                   <div key={exp.id} className="flex items-center justify-between border-b pb-2 last:border-b-0">
-                    <div><span className="text-sm font-medium">{exp.type_import === 'salaries' ? 'Import Salaries' : 'Import Variables'}</span><span className="text-xs text-gray-400 ml-2">{exp.nb_lignes} lignes</span></div>
+                    <div><span className="text-sm font-medium">{exp.fichier_nom}</span><span className="text-xs text-gray-400 ml-2">{exp.nb_lignes} lignes</span></div>
                     <button onClick={() => download(exp.id, exp.fichier_nom)} className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"><Download size={14} />Telecharger</button>
                   </div>
                 ))}
               </div>
             </div>
           )}
-          {exports.length === 0 && <p className="text-sm text-gray-400">Aucun fichier exporte</p>}
         </div>
       )}
     </div>

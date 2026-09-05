@@ -1,10 +1,19 @@
 /**
  * AI Verification and Correction System for BAUD Module
  * Verifies salary calculations, detects anomalies, and provides corrections
+ *
+ * References legales documentees :
+ * - SMIG : Decret n67/2026 du 30/04/2026, JORT n44, regime 40h = 470.251 DT
+ * - CNSS : Loi n73-40 du 24/07/1973, 9.68% plafond 5000 DT
+ * - IRPP : Loi n74-9 du 20/03/1974, bareme annuel LF 2025 art. 36 (8 tranches)
+ * - CSS : Loi n92-73 du 28/07/1992, 0.5% du revenu net imposable
+ * - Frais pro : 10% plafond 2000 DT/an (usage)
+ * - Anciennete : Art. 135 CT (loi n66-27 du 30/04/1966), bareme generique
+ * - Revalorisation : Decret n68/2026 du 30/04/2026, +5%/an cumulatif
  */
 
 import { Employee, PointageData } from './baudParser.js';
-import { calculateSalary, SalaryResult } from './baudCalculator.js';
+import { calculateSalary, SalaryResult, calculateAnciennete, getTauxAnciennete } from './baudCalculator.js';
 
 export interface VerificationCheck {
   name: string;
@@ -48,18 +57,25 @@ export interface AutoFixAction {
   applied: boolean;
 }
 
-// Tunisian Labor Code Constants 2026
+/**
+ * Constantes legales tunisiennes 2026
+ */
 const CONSTANTS = {
+  /** Loi n73-40 : taux CNSS salarial */
   CNSS_SALARIAL: 0.0968,
+  /** Loi n73-40 : taux CNSS patronal */
   CNSS_PATRONAL: 0.1657,
   AT_MP: 0.005,
   TFP: 0.01,
   FOPROLOS: 0.01,
+  /** Loi n92-73 : CSS = 0.5% revenu net imposable */
   CSS: 0.005,
   PLAFOND_CNSS: 5000,
-  SMIG: 480,
+  /** Decret n67/2026, JORT n44, regime 40h/semaine */
+  SMIG: 470.251,
   FRAIS_PRO_MAX: 2000,
   FRAIS_PRO_RATE: 0.10,
+  /** LF 2025 art. 36 : bareme annuel 8 tranches */
   IRPP_BRACKETS: [
     { min: 0, max: 5000, rate: 0 },
     { min: 5000, max: 10000, rate: 0.15 },
@@ -70,11 +86,13 @@ const CONSTANTS = {
     { min: 50000, max: 70000, rate: 0.38 },
     { min: 70000, max: Infinity, rate: 0.40 },
   ],
+  /** Decret n68/2026 : revalorisation +5%/an */
+  REVALORISATION_TAUX: 0.05,
 };
 
-/**
- * Main verification function
- */
+// ============================================================================
+// Fonction principale de verification
+// ============================================================================
 export function verifySalaryCalculations(
   employees: Employee[],
   pointage: PointageData[],
@@ -86,7 +104,6 @@ export function verifySalaryCalculations(
   const corrections: CorrectionAction[] = [];
   const autoFixes: AutoFixAction[] = [];
 
-  // Create pointage lookup
   const pointageMap = new Map<string, PointageData>();
   for (const ptg of pointage) {
     pointageMap.set(ptg.matricule, ptg);
@@ -96,7 +113,7 @@ export function verifySalaryCalculations(
   let warnings = 0;
   let errors = 0;
 
-  // 1. Check for missing employees
+  // 1. Salaries manquants
   for (const emp of employees) {
     if (!salaryResults.has(emp.matricule)) {
       missing.push(`${emp.matricule} ${emp.nom} ${emp.prenom}`);
@@ -110,15 +127,15 @@ export function verifySalaryCalculations(
     }
   }
 
-  // 2. Verify each employee calculation
+  // 2. Verification individuelle
   for (const emp of employees) {
     const result = salaryResults.get(emp.matricule);
     if (!result) continue;
 
     const ptg = pointageMap.get(emp.matricule);
-    const verificationChecks = verifyEmployee(emp, ptg, result, corrections, autoFixes);
-    
-    for (const check of verificationChecks) {
+    const empChecks = verifyEmployee(emp, ptg, result, corrections, autoFixes);
+
+    for (const check of empChecks) {
       checks.push(check);
       if (check.status === 'warning') warnings++;
       if (check.status === 'error') errors++;
@@ -126,48 +143,36 @@ export function verifySalaryCalculations(
     verified++;
   }
 
-  // 3. Cross-employee anomaly detection
+  // 3. Anomalies inter-employes
   const crossChecks = detectCrossEmployeeAnomalies(employees, salaryResults, autoFixes);
   for (const anomaly of crossChecks) {
     anomalies.push(anomaly);
-    checks.push({
-      name: 'Anomalie inter-employés',
-      status: 'warning',
-      detail: anomaly,
-    });
+    checks.push({ name: 'Anomalie inter-employes', status: 'warning', detail: anomaly });
     warnings++;
   }
 
-  // 4. Verify totals
+  // 4. Verification des totaux
   const totalChecks = verifyTotals(employees, salaryResults);
   checks.push(...totalChecks);
 
-  // Determine verdict
   let verdict: VerificationResult['verdict'] = 'OK';
   if (errors > 0) verdict = 'ERREUR';
   else if (warnings > 0) verdict = 'ATTENTION';
 
   return {
-    verdict,
-    checks,
-    missing,
-    anomalies,
-    corrections,
-    autoFixes,
+    verdict, checks, missing, anomalies, corrections, autoFixes,
     summary: {
       totalEmployees: employees.length,
-      verified,
-      warnings,
-      errors,
+      verified, warnings, errors,
       corrected: corrections.length,
       autoFixed: autoFixes.filter(f => f.applied).length,
     },
   };
 }
 
-/**
- * Verify individual employee calculation
- */
+// ============================================================================
+// Verification individuelle d'un employe
+// ============================================================================
 function verifyEmployee(
   emp: Employee,
   ptg: PointageData | undefined,
@@ -178,12 +183,12 @@ function verifyEmployee(
   const checks: VerificationCheck[] = [];
   const empLabel = `${emp.nom} ${emp.prenom}`;
 
-  // 1. Check SMIG (minimum wage)
+  // 1. SMIG — Decret n67/2026, JORT n44, regime 40h = 470.251 DT
   if (result.salaire_brut < CONSTANTS.SMIG) {
     checks.push({
       name: 'Salaire < SMIG',
       status: 'error',
-      detail: `${empLabel}: Brut ${result.salaire_brut.toFixed(3)} < SMIG ${CONSTANTS.SMIG} DT → Corriger le salaire à ${CONSTANTS.SMIG} DT`,
+      detail: `${empLabel}: Brut ${result.salaire_brut.toFixed(3)} < SMIG ${CONSTANTS.SMIG} DT (Decret 67/2026, regime 40h)`,
       employee: emp.matricule,
     });
     autoFixes.push({
@@ -195,68 +200,62 @@ function verifyEmployee(
     });
   }
 
-  // 2. Verify CNSS calculation
+  // 2. CNSS — Loi n73-40 : 9.68% du brut, plafond 5000 DT
   const expectedCNSS = Math.round(Math.min(result.salaire_brut, CONSTANTS.PLAFOND_CNSS) * CONSTANTS.CNSS_SALARIAL * 1000) / 1000;
   if (Math.abs(result.cnss_salariale - expectedCNSS) > 0.01) {
     checks.push({
       name: 'CNSS incorrect',
       status: 'error',
-      detail: `${empLabel}: CNSS calculé ${result.cnss_salariale.toFixed(3)} ≠ attendu ${expectedCNSS.toFixed(3)} → Recalculer`,
+      detail: `${empLabel}: CNSS ${result.cnss_salariale.toFixed(3)} != attendu ${expectedCNSS.toFixed(3)} (Loi 73-40)`,
       employee: emp.matricule,
       correction: { field: 'cnss_salariale', oldValue: result.cnss_salariale, newValue: expectedCNSS },
     });
     corrections.push({
-      matricule: emp.matricule,
-      nom: empLabel,
-      field: 'cnss_salariale',
-      oldValue: result.cnss_salariale,
-      newValue: expectedCNSS,
-      reason: 'Recalcul CNSS 9.68% sur brut plafonné 5000 DT',
+      matricule: emp.matricule, nom: empLabel,
+      field: 'cnss_salariale', oldValue: result.cnss_salariale, newValue: expectedCNSS,
+      reason: 'Recalcul CNSS 9.68% sur brut plafonne 5000 DT (Loi 73-40)',
     });
   }
 
-  // 3. Verify IRPP calculation (annual method)
+  // 3. IRPP — Loi n74-9, bareme annuel LF 2025 art. 36
   const expectedIRPP = calculateExpectedIRPP(result.revenu_net_imposable);
   if (Math.abs(result.irpp - expectedIRPP) > 0.01) {
     checks.push({
       name: 'IRPP incorrect',
       status: 'error',
-      detail: `${empLabel}: IRPP calculé ${result.irpp.toFixed(3)} ≠ attendu ${expectedIRPP.toFixed(3)} → Recalculer`,
+      detail: `${empLabel}: IRPP ${result.irpp.toFixed(3)} != attendu ${expectedIRPP.toFixed(3)} (LF 2025 art. 36)`,
       employee: emp.matricule,
       correction: { field: 'irpp', oldValue: result.irpp, newValue: expectedIRPP },
     });
     corrections.push({
-      matricule: emp.matricule,
-      nom: empLabel,
-      field: 'irpp',
-      oldValue: result.irpp,
-      newValue: expectedIRPP,
-      reason: 'Recalcul IRPP barème annuel LF 2025',
+      matricule: emp.matricule, nom: empLabel,
+      field: 'irpp', oldValue: result.irpp, newValue: expectedIRPP,
+      reason: 'Recalcul IRPP bareme annuel LF 2025 (Loi 74-9)',
     });
   }
 
-  // 4. Verify CSS calculation
+  // 4. CSS — Loi n92-73 : 0.5% du revenu net imposable
   const expectedCSS = Math.round(result.revenu_net_imposable * CONSTANTS.CSS * 1000) / 1000;
   if (Math.abs(result.css_salariale - expectedCSS) > 0.01) {
     checks.push({
       name: 'CSS incorrect',
       status: 'error',
-      detail: `${empLabel}: CSS calculé ${result.css_salariale.toFixed(3)} ≠ attendu ${expectedCSS.toFixed(3)} → Recalculer`,
+      detail: `${empLabel}: CSS ${result.css_salariale.toFixed(3)} != attendu ${expectedCSS.toFixed(3)} (Loi 92-73)`,
       employee: emp.matricule,
     });
   }
 
-  // 5. Check for missing pointage data
+  // 5. Pointage manquant
   if (!ptg) {
     checks.push({
       name: 'Pointage manquant',
       status: 'warning',
-      detail: `${empLabel}: Pas de pointage → Créer un pointage par défaut (0 abs, 0 avance)`,
+      detail: `${empLabel}: Pas de pointage`,
       employee: emp.matricule,
     });
     autoFixes.push({
       type: 'add_pointage',
-      description: `Créer pointage pour ${empLabel} (0 absences, 0 avances)`,
+      description: `Creer pointage pour ${empLabel} (0 absences, 0 avances)`,
       matricule: emp.matricule,
       data: { matricule: emp.matricule, nom: emp.nom, prenom: emp.prenom, absences: '', avances: 0, conges_payes: '', heures_supplementaires: '' },
       applied: false,
@@ -264,103 +263,95 @@ function verifyEmployee(
   } else {
     const absences = parseInt(ptg.absences) || 0;
     if (absences > 22) {
-      checks.push({
-        name: 'Absences > 22j',
-        status: 'warning',
-        detail: `${empLabel}: ${absences} absences > 22 jours/mois → Vérifier`,
-        employee: emp.matricule,
-      });
+      checks.push({ name: 'Absences > 22j', status: 'warning', detail: `${empLabel}: ${absences} absences > 22 jours/mois`, employee: emp.matricule });
     }
     if (ptg.avances > result.salaire_brut * 0.5) {
-      checks.push({
-        name: 'Avances > 50% brut',
-        status: 'warning',
-        detail: `${empLabel}: Avances ${ptg.avances} DT > 50% de ${result.salaire_brut.toFixed(3)} DT → Vérifier`,
-        employee: emp.matricule,
-      });
+      checks.push({ name: 'Avances > 50% brut', status: 'warning', detail: `${empLabel}: Avances ${ptg.avances} DT > 50% de ${result.salaire_brut.toFixed(3)} DT`, employee: emp.matricule });
     }
   }
 
-  // 6. Check for negative values
+  // 6. Net negatif
   if (result.salaire_net < 0) {
-    checks.push({
-      name: 'Net négatif',
-      status: 'error',
-      detail: `${empLabel}: Net ${result.salaire_net.toFixed(3)} < 0 → Vérifier les retenues`,
-      employee: emp.matricule,
-    });
+    checks.push({ name: 'Net negatif', status: 'error', detail: `${empLabel}: Net ${result.salaire_net.toFixed(3)} < 0`, employee: emp.matricule });
   }
 
-  // 7. Verify net calculation
+  // 7. Verification calcul net
   const expectedNet = Math.round((result.salaire_brut - result.total_retenues) * 1000) / 1000;
   if (Math.abs(result.salaire_net - expectedNet) > 0.01) {
-    checks.push({
-      name: 'Calcul net incorrect',
-      status: 'error',
-      detail: `${empLabel}: Net ${result.salaire_net.toFixed(3)} ≠ attendu ${expectedNet.toFixed(3)} → Recalculer`,
-      employee: emp.matricule,
-    });
+    checks.push({ name: 'Calcul net incorrect', status: 'error', detail: `${empLabel}: Net ${result.salaire_brut.toFixed(3)} != attendu ${expectedNet.toFixed(3)}`, employee: emp.matricule });
   }
 
-  // 8. Checkheures supplémentaires
-  if (result.heures_supplementaires > 0) {
-    const maxHS = 8 * 4.33;
-    if (result.heures_supplementaires > maxHS * 2) {
+  // 8. Heures sup > 70h/mois
+  if (result.heures_supplementaires > 0 && result.heures_supplementaires > 8 * 4.33 * 2) {
+    checks.push({ name: 'HS > 70h', status: 'warning', detail: `${empLabel}: ${result.heures_supplementaires}h sup > 70h max`, employee: emp.matricule });
+  }
+
+  // 9. CNSS manquant
+  if (!emp.numero_cnss || emp.numero_cnss.length < 5) {
+    checks.push({ name: 'CNSS manquant', status: 'warning', detail: `${empLabel}: Numero CNSS manquant`, employee: emp.matricule });
+  }
+
+  // 10. CIN manquant
+  if (!emp.cin || emp.cin.length < 5) {
+    checks.push({ name: 'CIN manquant', status: 'warning', detail: `${empLabel}: CIN manquant`, employee: emp.matricule });
+  }
+
+  // 11. RIB manquant
+  if (!emp.rib_ou_ccp || emp.rib_ou_ccp.length < 5) {
+    checks.push({ name: 'RIB manquant', status: 'warning', detail: `${empLabel}: RIB/CCP manquant`, employee: emp.matricule });
+  }
+
+  // 12. Taux anciennete — Art. 135 CT (loi n66-27)
+  if (emp.date_recrutement) {
+    const expectedTaux = getTauxAnciennete(result.anciennete_annees);
+    if (result.taux_anciennete !== expectedTaux) {
       checks.push({
-        name: 'HS > 70h',
-        status: 'warning',
-        detail: `${empLabel}: ${result.heures_supplementaires}h sup > ${maxHS * 2}h max → Vérifier`,
+        name: 'Taux anciennete incorrect',
+        status: 'error',
+        detail: `${empLabel}: Taux ${result.taux_anciennete}% != attendu ${expectedTaux}% (${result.anciennete_annees} ans)`,
         employee: emp.matricule,
+        correction: { field: 'taux_anciennete', oldValue: result.taux_anciennete, newValue: expectedTaux },
+      });
+      corrections.push({
+        matricule: emp.matricule, nom: empLabel,
+        field: 'taux_anciennete', oldValue: result.taux_anciennete, newValue: expectedTaux,
+        reason: `Recalcul taux anciennete pour ${result.anciennete_annees} ans (Art. 135 CT)`,
       });
     }
   }
 
-  // 9. Check missing CNSS number
-  if (!emp.numero_cnss || emp.numero_cnss.length < 5) {
+  // 13. Verification frais professionnels
+  const expectedFraisPro = Math.round(Math.min(result.revenu_imposable * 12 * CONSTANTS.FRAIS_PRO_RATE, CONSTANTS.FRAIS_PRO_MAX) / 12 * 1000) / 1000;
+  if (Math.abs(result.frais_pro - expectedFraisPro) > 0.01) {
     checks.push({
-      name: 'CNSS manquant',
-      status: 'warning',
-      detail: `${empLabel}: Numéro CNSS manquant ou invalide → Ajouter le numéro CNSS`,
+      name: 'Frais pro incorrect',
+      status: 'error',
+      detail: `${empLabel}: Frais pro ${result.frais_pro.toFixed(3)} != attendu ${expectedFraisPro.toFixed(3)} (10% plafond 2000 DT/an)`,
       employee: emp.matricule,
     });
   }
 
-  // 10. Check missing CIN
-  if (!emp.cin || emp.cin.length < 5) {
+  // 14. Verification CSS base = revenu_net_imposable (pas brut)
+  const wrongCSS = Math.round(result.salaire_brut * CONSTANTS.CSS * 1000) / 1000;
+  if (Math.abs(result.css_salariale - wrongCSS) < 0.01 && result.css_salariale > 0) {
     checks.push({
-      name: 'CIN manquant',
-      status: 'warning',
-      detail: `${empLabel}: CIN manquant → Ajouter le numéro CIN`,
+      name: 'CSS calcule sur brut au lieu de RNI',
+      status: 'error',
+      detail: `${empLabel}: CSS semble calcule sur le brut (${wrongCSS.toFixed(3)}) au lieu du revenu net imposable (${expectedCSS.toFixed(3)})`,
       employee: emp.matricule,
     });
   }
 
-  // 11. Check missing RIB
-  if (!emp.rib_ou_ccp || emp.rib_ou_ccp.length < 5) {
-    checks.push({
-      name: 'RIB manquant',
-      status: 'warning',
-      detail: `${empLabel}: RIB/CCP manquant → Ajouter le RIB pour le virement`,
-      employee: emp.matricule,
-    });
-  }
-
-  // If no issues found, add OK check
   if (checks.length === 0) {
-    checks.push({
-      name: 'Vérification OK',
-      status: 'ok',
-      detail: `${empLabel}: ✓ Tous les calculs sont corrects`,
-      employee: emp.matricule,
-    });
+    checks.push({ name: 'Verification OK', status: 'ok', detail: `${empLabel}: Tous les calculs sont corrects`, employee: emp.matricule });
   }
 
   return checks;
 }
 
-/**
- * Calculate expected IRPP using annual method
- */
+// ============================================================================
+// Calcul IRPP attendu (methode annuelle)
+// ============================================================================
 function calculateExpectedIRPP(revenuNetImposable: number): number {
   const annual = revenuNetImposable * 12;
   let irppAnnual = 0;
@@ -377,9 +368,9 @@ function calculateExpectedIRPP(revenuNetImposable: number): number {
   return Math.round((irppAnnual / 12) * 1000) / 1000;
 }
 
-/**
- * Detect anomalies across employees
- */
+// ============================================================================
+// Anomalies inter-employes
+// ============================================================================
 function detectCrossEmployeeAnomalies(
   employees: Employee[],
   salaryResults: Map<string, SalaryResult>,
@@ -387,7 +378,7 @@ function detectCrossEmployeeAnomalies(
 ): string[] {
   const anomalies: string[] = [];
 
-  // 1. Check for duplicate matricules
+  // Matricules en double
   const matriculeCount = new Map<string, number>();
   for (const emp of employees) {
     matriculeCount.set(emp.matricule, (matriculeCount.get(emp.matricule) || 0) + 1);
@@ -395,19 +386,16 @@ function detectCrossEmployeeAnomalies(
   for (const [mat, count] of matriculeCount) {
     if (count > 1) {
       anomalies.push(`Matricule ${mat} en double (${count} fois)`);
-      // Auto-fix: suggest new matricule
       const maxMat = Math.max(...employees.map(e => parseInt(e.matricule) || 0));
       autoFixes.push({
         type: 'fix_duplicate',
-        description: `Changer le matricule dupliqué ${mat} en ${maxMat + 1}`,
-        matricule: mat,
-        data: { newMatricule: String(maxMat + 1) },
-        applied: false,
+        description: `Changer le matricule duplique ${mat} en ${maxMat + 1}`,
+        matricule: mat, data: { newMatricule: String(maxMat + 1) }, applied: false,
       });
     }
   }
 
-  // 2. Check for salary outliers (using IQR method)
+  // Salaires aberrants (IQR)
   const salaries = employees.map(e => e.salaire_brut).filter(s => s > 0).sort((a, b) => a - b);
   if (salaries.length > 10) {
     const q1 = salaries[Math.floor(salaries.length * 0.25)];
@@ -415,7 +403,6 @@ function detectCrossEmployeeAnomalies(
     const iqr = q3 - q1;
     const lowerBound = q1 - 1.5 * iqr;
     const upperBound = q3 + 1.5 * iqr;
-
     for (const emp of employees) {
       if (emp.salaire_brut < lowerBound || emp.salaire_brut > upperBound) {
         anomalies.push(`${emp.nom} ${emp.prenom}: Salaire ${emp.salaire_brut} aberrant (hors IQR [${lowerBound.toFixed(2)}, ${upperBound.toFixed(2)}])`);
@@ -423,26 +410,22 @@ function detectCrossEmployeeAnomalies(
     }
   }
 
-  // 3. Check for missing CNSS numbers
+  // CNSS/CIN manquants
   for (const emp of employees) {
     if (!emp.numero_cnss || emp.numero_cnss.length < 5) {
-      anomalies.push(`${emp.nom} ${emp.prenom}: Numéro CNSS manquant ou invalide`);
+      anomalies.push(`${emp.nom} ${emp.prenom}: Numero CNSS manquant`);
     }
-  }
-
-  // 4. Check for missing CIN
-  for (const emp of employees) {
     if (!emp.cin || emp.cin.length < 5) {
-      anomalies.push(`${emp.nom} ${emp.prenom}: CIN manquant ou invalide`);
+      anomalies.push(`${emp.nom} ${emp.prenom}: CIN manquant`);
     }
   }
 
   return anomalies;
 }
 
-/**
- * Verify totals
- */
+// ============================================================================
+// Verification des totaux
+// ============================================================================
 function verifyTotals(
   employees: Employee[],
   salaryResults: Map<string, SalaryResult>
@@ -458,7 +441,6 @@ function verifyTotals(
   for (const emp of employees) {
     const result = salaryResults.get(emp.matricule);
     if (!result) continue;
-
     totalBrut += result.salaire_brut;
     totalCNSS += result.cnss_salariale;
     totalIRPP += result.irpp;
@@ -466,7 +448,6 @@ function verifyTotals(
     totalNet += result.salaire_net;
   }
 
-  // Check ratios
   const cnssRatio = totalCNSS / totalBrut;
   const irppRatio = totalIRPP / totalBrut;
 
@@ -480,13 +461,12 @@ function verifyTotals(
 
   if (irppRatio > 0.3) {
     checks.push({
-      name: 'Ratio IRPP élevé',
+      name: 'Ratio IRPP eleve',
       status: 'warning',
       detail: `Ratio IRPP/Brut: ${(irppRatio * 100).toFixed(2)}% (> 30%)`,
     });
   }
 
-  // Add summary check
   checks.push({
     name: 'Totaux',
     status: 'ok',
@@ -496,9 +476,9 @@ function verifyTotals(
   return checks;
 }
 
-/**
- * Apply corrections to salary results
- */
+// ============================================================================
+// Application des corrections
+// ============================================================================
 export function applyCorrections(
   employees: Employee[],
   pointage: PointageData[],
@@ -514,8 +494,7 @@ export function applyCorrections(
     const newResult = { ...result };
     (newResult as any)[correction.field] = correction.newValue;
 
-    // Recalculate totals if needed
-    if (correction.field === 'cnss_salariale' || correction.field === 'irpp' || correction.field === 'css_salariale') {
+    if (['cnss_salariale', 'irpp', 'css_salariale'].includes(correction.field)) {
       newResult.total_retenues = newResult.cnss_salariale + newResult.irpp + newResult.css_salariale;
       newResult.salaire_net = Math.round((newResult.salaire_brut - newResult.total_retenues) * 1000) / 1000;
       newResult.net_a_payer = newResult.salaire_net;
@@ -527,9 +506,9 @@ export function applyCorrections(
   return correctedResults;
 }
 
-/**
- * Apply auto-fixes to employees and pointage data
- */
+// ============================================================================
+// Application des auto-fixes
+// ============================================================================
 export function applyAutoFixes(
   employees: Employee[],
   pointage: PointageData[],
@@ -543,33 +522,32 @@ export function applyAutoFixes(
 
     switch (fix.type) {
       case 'add_pointage':
-        // Add missing pointage entry
         newPointage.push(fix.data);
         break;
 
-      case 'fix_duplicate':
-        // Fix duplicate matricule (change the last occurrence)
+      case 'fix_duplicate': {
         const lastIndex = newEmployees.findIndex(e => e.matricule === fix.matricule);
         if (lastIndex >= 0) {
           newEmployees[lastIndex] = { ...newEmployees[lastIndex], matricule: fix.data.newMatricule };
         }
         break;
+      }
 
-      case 'fix_smig':
-        // Fix salary to SMIG
+      case 'fix_smig': {
         const empIndex = newEmployees.findIndex(e => e.matricule === fix.matricule);
         if (empIndex >= 0) {
           newEmployees[empIndex] = { ...newEmployees[empIndex], salaire_brut: fix.data.newValue };
         }
         break;
+      }
 
-      case 'fix_cnss':
-        // Fix CNSS number
+      case 'fix_cnss': {
         const empIdx = newEmployees.findIndex(e => e.matricule === fix.matricule);
         if (empIdx >= 0) {
           newEmployees[empIdx] = { ...newEmployees[empIdx], numero_cnss: fix.data.newValue };
         }
         break;
+      }
     }
   }
 

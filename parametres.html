@@ -196,6 +196,68 @@
       </div>
     </div>
 
+    <div class="section">
+      <h2>BAUD - Paramètres Paie</h2>
+      <div class="row">
+        <div class="field">
+          <label>SMIG 2026 (DT/mois)</label>
+          <input type="number" id="smig_2026" value="470.251" step="0.001">
+          <div class="hint">Décret 67/2026 — régime 40h/semaine</div>
+        </div>
+        <div class="field">
+          <label>CNSS Salarial (%)</label>
+          <input type="number" id="cnss_salarial" value="9.68" step="0.01">
+        </div>
+        <div class="field">
+          <label>Plafond CNSS (DT)</label>
+          <input type="number" id="cnss_plafond" value="5000" step="1">
+        </div>
+        <div class="field">
+          <label>CNSS Patronal (%)</label>
+          <input type="number" id="cnss_patronal" value="16.57" step="0.01">
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>Prime Ancienneté - Palier 1 (ans)</label>
+          <input type="number" id="anc_palier1" value="3" step="1">
+          <div class="hint">À partir de X ans → taux ci-dessous</div>
+        </div>
+        <div class="field">
+          <label>Prime Ancienneté - Taux 1 (%)</label>
+          <input type="number" id="anc_taux1" value="5" step="1">
+        </div>
+        <div class="field">
+          <label>Prime Ancienneté - Palier 2 (ans)</label>
+          <input type="number" id="anc_palier2" value="6" step="1">
+        </div>
+        <div class="field">
+          <label>Prime Ancienneté - Taux 2 (%)</label>
+          <input type="number" id="anc_taux2" value="10" step="1">
+        </div>
+        <div class="field">
+          <label>Prime Ancienneté - Palier 3 (ans)</label>
+          <input type="number" id="anc_palier3" value="9" step="1">
+        </div>
+        <div class="field">
+          <label>Prime Ancienneté - Taux 3 (%)</label>
+          <input type="number" id="anc_taux3" value="15" step="1">
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>Revalorisation Légale Taux (%)</label>
+          <input type="number" id="reval_taux" value="5" step="0.1">
+          <div class="hint">Décret 68/2026 — +5%/an cumulatif</div>
+        </div>
+        <div class="field">
+          <label>Revalorisation - Appliquée à</label>
+          <input type="text" id="reval_applique" value="salaire_de_base, ind_transport, prime_presence">
+          <div class="hint">Champs séparés par virgule</div>
+        </div>
+      </div>
+    </div>
+
     <div class="actions">
       <button class="btn btn-primary" onclick="generateConfig()">Générer config.json</button>
       <button class="btn btn-success" onclick="downloadConfig()">Télécharger config.json</button>
@@ -249,6 +311,27 @@
           '04-2026': document.getElementById('month_04').value,
           '05-2026': document.getElementById('month_05').value,
           '06-2026': document.getElementById('month_06').value
+        },
+        baud: {
+          smig_2026: parseFloat(document.getElementById('smig_2026').value) || 470.251,
+          cnss_salarial: parseFloat(document.getElementById('cnss_salarial').value) / 100 || 0.0968,
+          cnss_plafond: parseFloat(document.getElementById('cnss_plafond').value) || 5000,
+          cnss_patronal: parseFloat(document.getElementById('cnss_patronal').value) / 100 || 0.1657,
+          prime_anciennete: {
+            enabled: true,
+            base: 'salaire_de_base',
+            bareme: [
+              { min_years: 0, taux: 0 },
+              { min_years: parseInt(document.getElementById('anc_palier1').value) || 3, taux: parseInt(document.getElementById('anc_taux1').value) || 5 },
+              { min_years: parseInt(document.getElementById('anc_palier2').value) || 6, taux: parseInt(document.getElementById('anc_taux2').value) || 10 },
+              { min_years: parseInt(document.getElementById('anc_palier3').value) || 9, taux: parseInt(document.getElementById('anc_taux3').value) || 15 }
+            ]
+          },
+          revalorisation_legale: {
+            enabled: true,
+            taux: parseFloat(document.getElementById('reval_taux').value) / 100 || 0.05,
+            applique_sur: (document.getElementById('reval_applique').value || 'salaire_de_base, ind_transport, prime_presence').split(',').map(s => s.trim())
+          }
         }
       };
     }
@@ -325,6 +408,23 @@
             document.getElementById('month_04').value = config.months['04-2026'] || '';
             document.getElementById('month_05').value = config.months['05-2026'] || '';
             document.getElementById('month_06').value = config.months['06-2026'] || '';
+          }
+          
+          if (config.baud) {
+            if (config.baud.smig_2026 !== undefined) document.getElementById('smig_2026').value = config.baud.smig_2026;
+            if (config.baud.cnss_salarial !== undefined) document.getElementById('cnss_salarial').value = (config.baud.cnss_salarial * 100).toFixed(2);
+            if (config.baud.cnss_plafond !== undefined) document.getElementById('cnss_plafond').value = config.baud.cnss_plafond;
+            if (config.baud.cnss_patronal !== undefined) document.getElementById('cnss_patronal').value = (config.baud.cnss_patronal * 100).toFixed(2);
+            if (config.baud.prime_anciennete?.bareme) {
+              const b = config.baud.prime_anciennete.bareme;
+              if (b[1]) { document.getElementById('anc_palier1').value = b[1].min_years; document.getElementById('anc_taux1').value = b[1].taux; }
+              if (b[2]) { document.getElementById('anc_palier2').value = b[2].min_years; document.getElementById('anc_taux2').value = b[2].taux; }
+              if (b[3]) { document.getElementById('anc_palier3').value = b[3].min_years; document.getElementById('anc_taux3').value = b[3].taux; }
+            }
+            if (config.baud.revalorisation_legale) {
+              if (config.baud.revalorisation_legale.taux !== undefined) document.getElementById('reval_taux').value = (config.baud.revalorisation_legale.taux * 100).toFixed(1);
+              if (config.baud.revalorisation_legale.applique_sur) document.getElementById('reval_applique').value = config.baud.revalorisation_legale.applique_sur.join(', ');
+            }
           }
           
           showStatus('Fichier chargé avec succès !', 'success');
