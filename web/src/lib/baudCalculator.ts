@@ -364,20 +364,23 @@ export function calculateSalary(input: SalaryInput): SalaryResult {
   const mit = Math.round(prime_presence_base * MIT_TAUX * 1000) / 1000;
 
   // 8. Salaire brut total = base rév + HS + prime ancienneté + transport + présence + primes légales + augmentation
-  //    Les primes légales (panier, douche, savon, lait, nuit, logement) et l'augmentation sont incluses dans le brut
-  //    Confirmation bulletin Sage: l'augmentation (4100) fait partie du Total Brut
+  //    Confirmation bulletin Sage:
+  //    - Le Total Brut EXCLUT la nuit (3802), les HS (4113), et le rappel (5100)
+  //    - L'augmentation (4100) est INCLUSE dans le Total Brut
+  //    - La nuit (3802) est un gain séparé, soumis à CNSS mais pas dans le Total Brut
   const salaire_brut = Math.round((
     salaire_base_reval + majoration_hs + prime_anciennete
     + ind_transport_base + prime_presence_base
-    + prime_panier + prime_douche + prime_savon + prime_lait + prime_nuit + prime_logement
+    + prime_panier + prime_douche + prime_savon + prime_lait + prime_logement
     + augmentation
   ) * 1000) / 1000;
 
-  // 9. Assiette CNSS = brut - prime_lait (exclue par Décret 2003-1098 art. 11)
-  //    Le savon est aussi exclu en théorie mais le bulletin Sage ne le soustrait pas toujours
-  //    On retire uniquement le lait pour coller au bulletin
-  //    Confirmation bulletin Sage: l'augmentation (4100) est INCLUSE dans l'assiette CNSS
-  //    La nuit (3802) est aussi incluse dans l'assiette CNSS
+  // 9. Assiette CNSS = Total Brut - prime_lait (exclue par Décret 2003-1098 art. 11)
+  //    Confirmation bulletin Sage:
+  //    - Le Total Brut EXCLUT nuit (3802), HS (4113), rappel (5100)
+  //    - L'augmentation (4100) est INCLUSE dans l'assiette CNSS
+  //    - Le plafond 5000 DT peut ne pas être appliqué pour certaines entreprises
+  //    - Le savon est aussi exclu en théorie mais le bulletin ne le soustrait pas toujours
   const assiette_cnss = Math.min(Math.max(0, salaire_brut - prime_lait), PLAFOND_CNSS);
 
   // 10. CNSS salarié (9.68% sur assiette plafonnée, excluant lait)

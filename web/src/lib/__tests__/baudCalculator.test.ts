@@ -507,17 +507,18 @@ describe('Primes légales — Convention BTP', () => {
     expect(r.cnss_salariale).toBe(Math.round(expectedAssiette * 0.0968 * 1000) / 1000);
   });
 
-  it('brut inclut toutes les primes légales', () => {
+  it('brut inclut toutes les primes légales (sauf nuit, HS, rappel)', () => {
     const r = calculateSalary({
       salaire_brut: 600, situation_fam: 'C', nombre_enfants: 0, mois: 6, annee: 2026,
       prime_nuit: 70, prime_logement: 25,
     });
-    // brut = base + transport + presence + panier + douche + savon + lait + nuit + logement
+    // Total Brut EXCLUT nuit (3802), HS (4113), rappel (5100) — confirmé bulletin Sage
+    // brut = base + transport + presence + panier + douche + savon + lait + logement
     const expectedBrut = Math.round((
       600 + 95.002 + 8.248
       + Math.round(0.800 * 26 * 1000) / 1000
       + Math.round(0.600 * 4.333 * 1000) / 1000
-      + 5.300 + 29.000 + 70 + 25
+      + 5.300 + 29.000 + 25
     ) * 1000) / 1000;
     expect(r.salaire_brut).toBe(expectedBrut);
   });
