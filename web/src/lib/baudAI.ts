@@ -182,11 +182,10 @@ function verifyEmployee(
   if (result.salaire_brut < CONSTANTS.SMIG) {
     checks.push({
       name: 'Salaire < SMIG',
-      status: 'warning',
-      detail: `${empLabel}: Brut ${result.salaire_brut} < SMIG ${CONSTANTS.SMIG}`,
+      status: 'error',
+      detail: `${empLabel}: Brut ${result.salaire_brut.toFixed(3)} < SMIG ${CONSTANTS.SMIG} DT → Corriger le salaire à ${CONSTANTS.SMIG} DT`,
       employee: emp.matricule,
     });
-    // Auto-fix: set to SMIG
     autoFixes.push({
       type: 'fix_smig',
       description: `Corriger le salaire de ${empLabel} au SMIG (${CONSTANTS.SMIG} DT)`,
@@ -202,7 +201,7 @@ function verifyEmployee(
     checks.push({
       name: 'CNSS incorrect',
       status: 'error',
-      detail: `${empLabel}: CNSS calculé ${result.cnss_salariale} ≠ attendu ${expectedCNSS}`,
+      detail: `${empLabel}: CNSS calculé ${result.cnss_salariale.toFixed(3)} ≠ attendu ${expectedCNSS.toFixed(3)} → Recalculer`,
       employee: emp.matricule,
       correction: { field: 'cnss_salariale', oldValue: result.cnss_salariale, newValue: expectedCNSS },
     });
@@ -212,7 +211,7 @@ function verifyEmployee(
       field: 'cnss_salariale',
       oldValue: result.cnss_salariale,
       newValue: expectedCNSS,
-      reason: 'Recalcul CNSS selon barème 9.68%',
+      reason: 'Recalcul CNSS 9.68% sur brut plafonné 5000 DT',
     });
   }
 
@@ -222,7 +221,7 @@ function verifyEmployee(
     checks.push({
       name: 'IRPP incorrect',
       status: 'error',
-      detail: `${empLabel}: IRPP calculé ${result.irpp} ≠ attendu ${expectedIRPP}`,
+      detail: `${empLabel}: IRPP calculé ${result.irpp.toFixed(3)} ≠ attendu ${expectedIRPP.toFixed(3)} → Recalculer`,
       employee: emp.matricule,
       correction: { field: 'irpp', oldValue: result.irpp, newValue: expectedIRPP },
     });
@@ -232,7 +231,7 @@ function verifyEmployee(
       field: 'irpp',
       oldValue: result.irpp,
       newValue: expectedIRPP,
-      reason: 'Recalcul IRPP selon barème annuel LF 2025',
+      reason: 'Recalcul IRPP barème annuel LF 2025',
     });
   }
 
@@ -242,7 +241,7 @@ function verifyEmployee(
     checks.push({
       name: 'CSS incorrect',
       status: 'error',
-      detail: `${empLabel}: CSS calculé ${result.css_salariale} ≠ attendu ${expectedCSS}`,
+      detail: `${empLabel}: CSS calculé ${result.css_salariale.toFixed(3)} ≠ attendu ${expectedCSS.toFixed(3)} → Recalculer`,
       employee: emp.matricule,
     });
   }
@@ -252,43 +251,31 @@ function verifyEmployee(
     checks.push({
       name: 'Pointage manquant',
       status: 'warning',
-      detail: `${empLabel}: Aucune donnée de pointage`,
+      detail: `${empLabel}: Pas de pointage → Créer un pointage par défaut (0 abs, 0 avance)`,
       employee: emp.matricule,
     });
-    // Auto-fix: create default pointage
     autoFixes.push({
       type: 'add_pointage',
-      description: `Créer un pointage par défaut pour ${empLabel} (0 absences, 0 avances)`,
+      description: `Créer pointage pour ${empLabel} (0 absences, 0 avances)`,
       matricule: emp.matricule,
-      data: {
-        matricule: emp.matricule,
-        nom: emp.nom,
-        prenom: emp.prenom,
-        absences: '',
-        avances: 0,
-        conges_payes: '',
-        heures_supplementaires: '',
-      },
+      data: { matricule: emp.matricule, nom: emp.nom, prenom: emp.prenom, absences: '', avances: 0, conges_payes: '', heures_supplementaires: '' },
       applied: false,
     });
   } else {
-    // Check absences合理性
     const absences = parseInt(ptg.absences) || 0;
     if (absences > 22) {
       checks.push({
-        name: 'Absences excessives',
+        name: 'Absences > 22j',
         status: 'warning',
-        detail: `${empLabel}: ${absences} absences (> 22 jours/mois)`,
+        detail: `${empLabel}: ${absences} absences > 22 jours/mois → Vérifier`,
         employee: emp.matricule,
       });
     }
-
-    // Check avances合理性
     if (ptg.avances > result.salaire_brut * 0.5) {
       checks.push({
-        name: 'Avances élevées',
+        name: 'Avances > 50% brut',
         status: 'warning',
-        detail: `${empLabel}: Avances ${ptg.avances} > 50% du brut ${result.salaire_brut}`,
+        detail: `${empLabel}: Avances ${ptg.avances} DT > 50% de ${result.salaire_brut.toFixed(3)} DT → Vérifier`,
         employee: emp.matricule,
       });
     }
@@ -297,9 +284,9 @@ function verifyEmployee(
   // 6. Check for negative values
   if (result.salaire_net < 0) {
     checks.push({
-      name: 'Salaire net négatif',
+      name: 'Net négatif',
       status: 'error',
-      detail: `${empLabel}: Net ${result.salaire_net} < 0`,
+      detail: `${empLabel}: Net ${result.salaire_net.toFixed(3)} < 0 → Vérifier les retenues`,
       employee: emp.matricule,
     });
   }
@@ -310,22 +297,52 @@ function verifyEmployee(
     checks.push({
       name: 'Calcul net incorrect',
       status: 'error',
-      detail: `${empLabel}: Net calculé ${result.salaire_net} ≠ attendu ${expectedNet}`,
+      detail: `${empLabel}: Net ${result.salaire_net.toFixed(3)} ≠ attendu ${expectedNet.toFixed(3)} → Recalculer`,
       employee: emp.matricule,
     });
   }
 
   // 8. Checkheures supplémentaires
   if (result.heures_supplementaires > 0) {
-    const maxHS = 8 * 4.33; // 8h/sem * 4.33 sem/mois
+    const maxHS = 8 * 4.33;
     if (result.heures_supplementaires > maxHS * 2) {
       checks.push({
-        name: 'Heures sup excessives',
+        name: 'HS > 70h',
         status: 'warning',
-        detail: `${empLabel}: ${result.heures_supplementaires}h sup > ${maxHS * 2}h max`,
+        detail: `${empLabel}: ${result.heures_supplementaires}h sup > ${maxHS * 2}h max → Vérifier`,
         employee: emp.matricule,
       });
     }
+  }
+
+  // 9. Check missing CNSS number
+  if (!emp.numero_cnss || emp.numero_cnss.length < 5) {
+    checks.push({
+      name: 'CNSS manquant',
+      status: 'warning',
+      detail: `${empLabel}: Numéro CNSS manquant ou invalide → Ajouter le numéro CNSS`,
+      employee: emp.matricule,
+    });
+  }
+
+  // 10. Check missing CIN
+  if (!emp.cin || emp.cin.length < 5) {
+    checks.push({
+      name: 'CIN manquant',
+      status: 'warning',
+      detail: `${empLabel}: CIN manquant → Ajouter le numéro CIN`,
+      employee: emp.matricule,
+    });
+  }
+
+  // 11. Check missing RIB
+  if (!emp.rib_ou_ccp || emp.rib_ou_ccp.length < 5) {
+    checks.push({
+      name: 'RIB manquant',
+      status: 'warning',
+      detail: `${empLabel}: RIB/CCP manquant → Ajouter le RIB pour le virement`,
+      employee: emp.matricule,
+    });
   }
 
   // If no issues found, add OK check
@@ -333,7 +350,7 @@ function verifyEmployee(
     checks.push({
       name: 'Vérification OK',
       status: 'ok',
-      detail: `${empLabel}: Tous les calculs sont corrects`,
+      detail: `${empLabel}: ✓ Tous les calculs sont corrects`,
       employee: emp.matricule,
     });
   }
