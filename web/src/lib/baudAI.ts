@@ -70,7 +70,6 @@ const CONSTANTS = {
   FOPROLOS: 0.01,
   /** Loi n92-73 : CSS = 0.5% revenu net imposable */
   CSS: 0.005,
-  PLAFOND_CNSS: 5000,
   /** Decret n67/2026, JORT n44, regime 40h/semaine */
   SMIG: 470.251,
   FRAIS_PRO_MAX: 2000,
@@ -200,9 +199,9 @@ function verifyEmployee(
     });
   }
 
-  // 2. CNSS — Loi n73-40 : 9.68% du brut, plafond 5000 DT
+  // 2. CNSS — Loi n73-40 : 9.68% du brut, AUCUN plafond
   //    Assiette = brut - prime_lait (exclue CNSS — Décret 2003-1098 art. 11)
-  const assietteCNSS = Math.min(Math.max(0, result.salaire_brut - result.prime_lait), CONSTANTS.PLAFOND_CNSS);
+  const assietteCNSS = Math.max(0, result.salaire_brut - result.prime_lait);
   const expectedCNSS = Math.round(assietteCNSS * CONSTANTS.CNSS_SALARIAL * 1000) / 1000;
   if (Math.abs(result.cnss_salariale - expectedCNSS) > 0.01) {
     checks.push({

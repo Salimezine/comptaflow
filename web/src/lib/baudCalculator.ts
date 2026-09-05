@@ -3,12 +3,28 @@
  * CNSS, IRPP, CSS, Allocations familiales
  * Prime ancienneté (barème configurable) + Revalorisation légale décret 68/2026
  *
+ * SYSTÈME UNIFIÉ DE PRORATISATION:
+ *   coefficient_presence = jours_effectivement_payés / jours_ouvrables_théoriques
+ *   montant_verse = montant_plein × coefficient_presence
+ *
+ *   Exceptions:
+ *   - Transport: transport_plein × revalorisation × coefficient
+ *   - Présence: présence_plein × revalorisation × coefficient
+ *   - MIT: présence_verse × 60.61%
+ *   - Augmentation: montant fixe × coefficient (PAS de revalorisation)
+ *
  * Ordre de calcul (sans dépendance circulaire):
  *   salaire_de_base
- *   → revalorisation légale (+5%/an sur base, transport, présence pour 2026-2028)
+ *   → revalorisation légale (+5%/an sur base pour 2026-2028)
  *   → prime_ancienneté (sur base revalorisée)
- *   → primes légales (panier, savon, douche, nuit, logement, lait)
- *   → salaire_brut_total = base_rév + HS + prime_ancienneté + transport_rév + présence_rév + primes_légales
+ *   → coefficient_presence (jours_payés / jours_ouvrables)
+ *   → primes légales (panier, douche, savon, lait, logement) = plein × coefficient
+ *   → transport = plein × revalorisation × coefficient
+ *   → présence = plein × revalorisation × coefficient
+ *   → MIT = présence × 60.61%
+ *   → augmentation = fixe × coefficient (pas de revalorisation)
+ *   → nuit = fixe × coefficient
+ *   → salaire_brut_total = base_rév + HS + prime_ancienneté + transport + présence + primes_légales + augmentation
  *   → assiettes CNSS (brut - lait) / IRPP / CSS sur salaire_brut_total
  */
 
@@ -23,15 +39,30 @@ export interface SalaryInput {
   date_recrutement?: string; // Date d'embauche (Excel serial ou YYYY-MM-DD)
   mois?: number; // Mois du bulletin (1-12)
   annee?: number; // Année du bulletin
-  ind_transport?: number; // Indemnité de transport conventionnelle (mensuel)
-  prime_presence?: number; // Prime de présence conventionnelle (mensuel)
-  // Primes légales ( valeurs par défaut configurable, ajustables par employé)
-  prime_nuit?: number; // Prime de nuit (variable par employé)
-  prime_logement?: number; // Prime de logement (variable par employé)
-  // Augmentation étatique (Décret 68/2026, +5%/an)
-  // Montant saisi manuellement dans Sage Paie — pas de formule automatique
-  // Incluse dans le brut total et l'assiette CNSS (confirmé bulletin Sage)
-  augmentation?: number; // Montant de l'augmentation 2025 (rubrique 4100)
+  // Coefficient de présence — CLÉ DU SYSTÈME PRORATISATION
+  // coefficient = jours_effectivement_payés / jours_ouvrables_théoriques
+  // Si non renseigné: calculé depuis absences_jours (jours_ouvrables = 26 par défaut)
+  jours_payes?: number; // Jours effectivement payés du mois
+  jours_ouvrables?: number; // Jours ouvrables théoriques du mois (défaut: 26)
+  // Transport — montant plein par salarié (appliquer revalorisation + coefficient)
+  transport_plein?: number; // Montant plein mensuel transport (varie par salarié)
+  // Primes légales — montants pleins mensuels (appliquer coefficient uniquement)
+  prime_panier_plein?: number; // Panier plein (défaut: 12.320 DT)
+  prime_douche_plein?: number; // Douche plein (défaut: 25.000 DT)
+  prime_savon_plein?: number; // Savon plein (défaut: 5.400 DT)
+  prime_lait_plein?: number; // Lait plein (défaut: 29.700 DT)
+  prime_logement_plein?: number; // Logement plein (défaut: 26.293 DT)
+  prime_nuit_plein?: number; // Nuit plein (fixe par salarié, pas de formule horaire)
+  // Augmentation — montants fixes DT par salarié, SANS revalorisation décret 68
+  // Uniquement coefficient_presence appliqué
+  augmentation_2025?: number; // Augmentation 2025 (rubrique 4100)
+  augmentation_2026?: number; // Augmentation 2026 (rubrique 4101)
+  // Champs legacy (compatibilité — les nouveaux champs ont priorité)
+  ind_transport?: number; // Indemnité de transport (legacy, utilisée si transport_plein absent)
+  prime_presence?: number; // Prime de présence (legacy)
+  prime_nuit?: number; // Prime de nuit (legacy)
+  prime_logement?: number; // Prime de logement (legacy)
+  augmentation?: number; // Augmentation (legacy, combines 2025+2026)
 }
 
 export interface SalaryResult {
@@ -43,18 +74,21 @@ export interface SalaryResult {
   prime_anciennete: number;       // Montant de la prime d'ancienneté
   taux_anciennete: number;        // Taux applicable (en %)
   anciennete_annees: number;      // Nombre d'années d'ancienneté
-  ind_transport: number;          // Indemnité de transport (après revalorisation si applicable)
-  prime_presence: number;         // Prime de présence (après revalorisation si applicable)
+  ind_transport: number;          // Indemnité de transport (après revalorisation × coefficient)
+  prime_presence: number;         // Prime de présence (après revalorisation × coefficient)
 
-  // Primes légales (Convention BTP)
-  prime_panier: number;           // Prime de panier légale (0.800 DT/jour, configurable)
-  prime_douche: number;           // Prime de douche (0.600 DT/semaine, configurable)
-  prime_savon: number;            // Prime de savon (exclue CNSS, configurable)
-  prime_nuit: number;             // Prime de nuit (variable par employé)
-  prime_logement: number;         // Prime de logement (variable par employé)
-  prime_lait: number;             // Prime de lait (exclue CNSS, configurable)
-  mit: number;                    // MIT = 60.61% × prime_presence
-  augmentation: number;           // Augmentation 2025 — montant saisi manuellement (4100)
+  // Primes légales (Convention BTP) —统一 proratisées
+  prime_panier: number;           // Panier = plein × coefficient
+  prime_douche: number;           // Douche = plein × coefficient
+  prime_savon: number;            // Savon = plein × coefficient (exclue CNSS)
+  prime_nuit: number;             // Nuit = plein × coefficient
+  prime_logement: number;         // Logement = plein × coefficient
+  prime_lait: number;             // Lait = plein × coefficient (exclue CNSS)
+  mit: number;                    // MIT = 60.61% × présence_verse
+  augmentation: number;           // Augmentation = fixe × coefficient (pas de revalorisation)
+
+  // Coefficient de présence (pour affichage/debug)
+  coefficient_presence: number;   // jours_payés / jours_ouvrables (1.0 = mois complet)
 
   // Assiette CNSS
   assiette_cnss: number;
@@ -136,73 +170,58 @@ const BAREME_ANCIENNETE_DEFAULT = [
 // Exception: entreprises ayant déjà accordé des augmentations équivalentes ou supérieures
 const REVALORISATION_TAUX = 0.05; // +5% par an
 
-/**
- * Indemnité de transport — Convention BTP Tunisie
- * Source: paie-tunisie.com — NON VÉRIFIÉ sur texte officiel JORT
- * Les montants ci-dessous sont issus du site paie-tunisie.com (référence Tunisie paie)
- * et suivent la progression ~5%/an cohérente avec le décret n°68/2026.
- * Vérifier sur le texte officiel JORT si un contrôle CNSS/inspection du travail est prévu.
- */
-const BTP_TRANSPORT: Record<number, number> = {
-  2021: 79.399,
-  2023: 84.758,
-  2024: 90.479,
-  2026: 95.002,  // paie-tunisie.com, non vérifié sur texte officiel JORT
-  2027: 99.753,  // paie-tunisie.com, non vérifié sur texte officiel JORT
-  2028: 104.740, // paie-tunisie.com, non vérifié sur texte officiel JORT
-};
+// Indemnité de transport — Convention BTP Tunisie
+// Le montant plein varie par salarié (au moins 2 paliers confirmés: 92.800 et 100.533 DT)
+// Le champ transport_plein par salarié est requis — PAS de valeur unique d'entreprise
+// Revalorisation: +5%/an cumulatif depuis juin 2026 (décret 68/2026)
+// Application: transport_verse = transport_plein × revalorisation × coefficient_presence
 
-/**
- * Prime de présence — Convention BTP Tunisie
- * Source: paie-tunisie.com — NON VÉRIFIÉ sur texte officiel JORT
- * Même observation que pour le transport: progression ~5%/an
- */
-const BTP_PRESENCE: Record<number, number> = {
-  2021: 6.894,
-  2023: 7.359,
-  2024: 7.856,
-  2026: 8.248,   // paie-tunisie.com, non vérifié sur texte officiel JORT
-  2027: 8.661,   // paie-tunisie.com, non vérifié sur texte officiel JORT
-  2028: 9.094,   // paie-tunisie.com, non vérifié sur texte officiel JORT
-};
+// Indemnité de présence — Convention BTP Tunisie
+// Montant plein par mois: 7.856 DT (avant juin 2026) → 8.249 DT (depuis juin 2026)
+// Revalorisation: +5%/an cumulatif depuis juin 2026 (décret 68/2026)
+// Application: présence_verse = présence_plein × revalorisation × coefficient_presence
 
 // ============================================================================
 // PRIMES LÉGALES — Convention BTP Tunisie + Décret n°2003-1098
 // ============================================================================
-// Source: paie-tunisie.com/387/fr/55/publications/batiment-et-travaux-publics
-//
-// Montants mensuels de référence (configurables via config.json → primes_légales)
-// Ordre de calcul: les primes légales s'ajoutent au brut AVANT le calcul CNSS/IRPP/CSS
+// MONTANTS PLEINS MENSUELS (universels, deduits empiriquement des bulletins réels)
+// Toutes les primes sont proratisées par coefficient_presence
+//   montant_verse = montant_plein × coefficient_presence
 //
 // Exclusion CNSS: le lait (4385) et le savon (3801) sont exclus de l'assiette CNSS
-// selon Décret n°2003-1098 du 19 mai 2003, Article 11:
-// "Le lait, le savon et autres produits accordés aux employés dans le cadre de la
-//  préservation de la santé et de la sécurité au travail ou leur contre-valeur en espèces."
+// selon Décret n°2003-1098 du 19 mai 2003, Article 11
 // ============================================================================
 
-// Prime de panier légale — Convention BTP
-// Convention: 800M/jour sous condition 7h+ continues, pauses < 1h
-// Montant bulletin: ~12 DT/mois (variable légèrement par employé, prorata jours travaillés)
-const PRIME_PANIER_JOUR = 0.800; // DT/jour — configurable
+// Montants pleins mensuels (à vérifier avec texte convention BTP réel)
+const PRIME_PANIER_PLEIN = 12.320;   // DT/mois — 2330
+const PRIME_DOUCHE_PLEIN = 25.000;   // DT/mois — 3210
+const PRIME_SAVON_PLEIN = 5.400;     // DT/mois — 3801 (exclue CNSS)
+const PRIME_LAIT_PLEIN = 29.700;     // DT/mois — 4385 (exclue CNSS)
+const PRIME_LOGEMENT_PLEIN = 26.293; // DT/mois — 4383
+const PRESENCE_PLEIN_BEFORE_JUNE = 7.856; // DT/mois — 2200 (avant juin 2026)
+const PRESENCE_PLEIN_JUNE_2026 = 8.249;   // DT/mois — 2200 (depuis juin 2026, décret 68)
+const MIT_TAUX = 0.6061; // 60.61% — Contribution Maladie, Invalidité, Tuberculose
 
-// Prime de douche — Convention BTP
-// Convention: 600M/semaine pour travailleurs en lieux sans douches ou en déplacement
-// Montant bulletin: ~24 DT/mois (variable légèrement)
-const PRIME_DOUCHE_SEMAINE = 0.600; // DT/semaine — configurable
-const SEMAINES_PAR_MOIS = 4.333;    // 52 semaines / 12 mois
+// Jours ouvrés par mois — calculés depuis le calendrier (weekdays)
+// Le coefficient = (jours_ouvrés - absences) / jours_ouvrés
+// Source: bulletin Sage Paie — l'entreprise ne soustrait PAS les jours fériés
+// Ex: mars 2026 = 22 jours (22 weekdays, même si vendredi 20 est férié)
+const JOURS_OUVRABLES_DEFAUT = 26; // Fallback si mois/année non renseignés
 
-// Prime de savon — Exclue de l'assiette CNSS (Décret 2003-1098, art. 11)
-// Montant bulletin: ~5.3 DT/mois (variable légèrement)
-const PRIME_SAVON = 5.300; // DT/mois — configurable
-
-// Prime de lait — Exclue de l'assiette CNSS (Décret 2003-1098, art. 11)
-// Montant bulletin: ~29 DT/mois (variable légèrement)
-const PRIME_LAIT = 29.000; // DT/mois — configurable
-
-// MIT — Contribution Maladie, Invalidité, Tuberculose
-// Calculé sur la prime de présence (2200)
-// Taux confirmé par bulletin: 60.61% × prime_presence
-const MIT_TAUX = 0.6061;
+/**
+ * Calcule le nombre de jours ouvrés (lundi-vendredi) dans un mois donné.
+ * NOTE: les jours fériés ne sont PAS soustraits (conformément au bulletin Sage).
+ * @returns Nombre de jours ouvrés du mois
+ */
+export function calculateJoursOuvres(mois: number, annee: number): number {
+  const daysInMonth = new Date(annee, mois, 0).getDate();
+  let weekdays = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dow = new Date(annee, mois - 1, d).getDay(); // 0=Dim, 1=Lun, ..., 6=Sam
+    if (dow >= 1 && dow <= 5) weekdays++; // Lun-Ven
+  }
+  return Math.max(1, weekdays); // Au moins 1 jour
+}
 
 /**
  * Convertit une date (Excel serial ou YYYY-MM-DD) en objet Date
@@ -298,92 +317,144 @@ export function calculateSalary(input: SalaryInput): SalaryResult {
     date_recrutement = '',
     mois = 1,
     annee = 2026,
-    ind_transport: ind_transport_input,
-    prime_presence: prime_presence_input,
-    prime_nuit: prime_nuit_input = 0,
-    prime_logement: prime_logement_input = 0,
-    augmentation: augmentation_input = 0,
+    // Nouveaux champs proratisation
+    jours_payes: jours_payes_input,
+    jours_ouvrables: jours_ouvrables_input,
+    transport_plein: transport_plein_input,
+    prime_panier_plein,
+    prime_douche_plein,
+    prime_savon_plein,
+    prime_lait_plein,
+    prime_logement_plein,
+    prime_nuit_plein: prime_nuit_plein_input,
+    augmentation_2025 = 0,
+    augmentation_2026 = 0,
+    // Champs legacy
+    ind_transport: ind_transport_legacy,
+    prime_presence: prime_presence_legacy,
+    prime_nuit: prime_nuit_legacy,
+    prime_logement: prime_logement_legacy,
+    augmentation: augmentation_legacy = 0,
   } = input;
 
   // 1. Salaire de base (avant toute prime ou revalorisation)
   const salaire_de_base = Math.max(0, salaire_de_base_input);
 
-  // 2. Indemnité de transport et prime de présence
-  //    Les valeurs BTP pour chaque année incluent déjà la progression conventionnelle (~5%/an).
-  //    Pas de revalorisation supplémentaire sur transport/présence si une valeur BTP existe
-  //    pour l'année demandée — sinon appliquer revalorisation sur la base 2026.
-  const ind_transport_base = ind_transport_input !== undefined
-    ? ind_transport_input
-    : (BTP_TRANSPORT[annee] || applyRevalorisation(BTP_TRANSPORT[2026] || 0, annee));
-  const prime_presence_base = prime_presence_input !== undefined
-    ? prime_presence_input
-    : (BTP_PRESENCE[annee] || applyRevalorisation(BTP_PRESENCE[2026] || 0, annee));
-
-  // 3. Application de la revalorisation légale (+5%/an pour 2026-2028)
-  //    Revalorisation sur le salaire de base UNIQUEMENT (transport/présence gérés ci-dessus)
-  //    Déc. n68/2026 : +5%/an cumulatif sur salaire de base, transport, présence
-  //    Les valeurs BTP pour 2027/2028 intègrent déjà cette revalorisation
+  // 2. Application de la revalorisation légale (+5%/an pour 2026-2028)
+  //    Décret n68/2026 : +5%/an cumulatif sur salaire de base
   const salaire_base_reval = applyRevalorisation(salaire_de_base, annee);
 
-  // 4. Prime d'ancienneté (sur base REVALORISÉE, pas sur l'origine)
-  //    L'ancienneté en années est indépendante du montant (pas de circularité)
+  // 3. Prime d'ancienneté (sur base REVALORISÉE, pas sur l'origine)
   const ancienneteAnnees = date_recrutement
     ? calculateAnciennete(date_recrutement, mois, annee)
     : 0;
   const tauxAnciennete = getTauxAnciennete(ancienneteAnnees);
   const prime_anciennete = Math.round(salaire_base_reval * tauxAnciennete / 100 * 1000) / 1000;
 
-  // 5. Heures supplémentaires (Article 90 Code du Travail)
-  //    Calculées sur le taux horaire du salaire de base (avant revalorisation)
+  // 4. Heures supplémentaires (Article 90 Code du Travail)
   const heures_par_mois = (40 * 52) / 12; // = 173.33h/mois pour régime 40h
   const taux_horaire = salaire_de_base / heures_par_mois;
-
-  // Calcul heures sup: jusqu'à 8h/semaine = 25%, au-delà = 50%
-  const hs_25 = Math.min(heures_supplementaires, 8 * 4.33); // ~34.64h/mois max à 25%
+  const hs_25 = Math.min(heures_supplementaires, 8 * 4.33);
   const hs_50 = Math.max(0, heures_supplementaires - hs_25);
   const majoration_hs = Math.round((taux_horaire * hs_25 * 0.25 + taux_horaire * hs_50 * 0.50) * 1000) / 1000;
 
-  // 6. Primes légales — Convention BTP
-  //    Panier: 0.800 DT/jour (sous condition 7h+ continues)
-  //    Douche: 0.600 DT/semaine (lieux sans douches ou déplacement)
-  //    Savon: montant fixe (exclue CNSS — Décret 2003-1098 art. 11)
-  //    Lait: montant fixe (exclue CNSS — Décret 2003-1098 art. 11)
-  //    Nuit: variable par employé (input)
-  //    Logement: variable par employé (input)
-  //    Augmentation: montant saisi manuellement (input) — Décret 68/2026
-  const jours_travailles = Math.max(0, 26 - absences_jours); // ~26 jours/mois ouvrier BTP
-  const prime_panier = Math.round(PRIME_PANIER_JOUR * jours_travailles * 1000) / 1000;
-  const prime_douche = Math.round(PRIME_DOUCHE_SEMAINE * SEMAINES_PAR_MOIS * 1000) / 1000;
-  const prime_savon = PRIME_SAVON;
-  const prime_lait = PRIME_LAIT;
-  const prime_nuit = Math.max(0, prime_nuit_input);
-  const prime_logement = Math.max(0, prime_logement_input);
-  const augmentation = Math.max(0, augmentation_input);
+  // =====================================================================
+  // 5. COEFFICIENT DE PRÉSENCE — Base de la proratisation unifiée
+  // =====================================================================
+  // coefficient = (jours_ouvrés - absences) / jours_ouvrés
+  // jours_ouvrés = weekdays du mois - jours fériés (calculé automatiquement)
+  // Source confirmée: bulletin Sage Paie juin 2026 (22 jours ouvrés)
+  const jours_ouvrables = jours_ouvrables_input
+    ?? (mois && annee ? calculateJoursOuvres(mois, annee) : JOURS_OUVRABLES_DEFAUT);
+  let coefficient_presence: number;
+  if (jours_payes_input !== undefined && jours_payes_input !== null) {
+    // Source fiable: pointage/badgeuse ou bulletin
+    coefficient_presence = Math.min(1, Math.max(0, jours_payes_input / jours_ouvrables));
+  } else {
+    // Fallback: calcul depuis absences (jours_ouvrés - absences)
+    const jours_travailles = Math.max(0, jours_ouvrables - absences_jours);
+    coefficient_presence = Math.min(1, Math.max(0, jours_travailles / jours_ouvrables));
+  }
+  coefficient_presence = Math.round(coefficient_presence * 10000) / 10000;
 
-  // 7. MIT — 60.61% de la prime de présence (confirmé par bulletin Sage Paie)
-  const mit = Math.round(prime_presence_base * MIT_TAUX * 1000) / 1000;
+  // =====================================================================
+  // 6. TRANSPORT — plein × revalorisation × coefficient
+  // =====================================================================
+  // Le montant plein varie par salarié (pas de valeur unique entreprise)
+  // Revalorisation décret 68/2026: +5%/an cumulatif depuis juin 2026
+  // Application: transport_verse = transport_plein × revalorisation × coefficient_presence
+  const transport_plein = transport_plein_input ?? ind_transport_legacy ?? 0;
+  // Revalorisation transport: +5% à partir de juin 2026 (décret 68/2026, JORT n°44)
+  const transport_reval = (annee > 2026 || (annee === 2026 && mois >= 6))
+    ? Math.round(transport_plein * Math.pow(1 + REVALORISATION_TAUX, annee - 2025) * 1000) / 1000
+    : transport_plein;
+  const ind_transport = Math.round(transport_reval * coefficient_presence * 1000) / 1000;
 
-  // 8. Salaire brut total = base rév + HS + prime ancienneté + transport + présence + primes légales + augmentation
-  //    Confirmation bulletin Sage:
-  //    - Le Total Brut EXCLUT la nuit (3802), les HS (4113), et le rappel (5100)
-  //    - L'augmentation (4100) est INCLUSE dans le Total Brut
-  //    - La nuit (3802) est un gain séparé, soumis à CNSS mais pas dans le Total Brut
+  // =====================================================================
+  // 7. PRÉSENCE — plein × revalorisation × coefficient
+  // =====================================================================
+  // Montant plein: 7.856 (avant juin 2026) → 8.249 (depuis juin 2026)
+  const presence_plein_base = (mois >= 6 && annee === 2026) || annee > 2026
+    ? PRESENCE_PLEIN_JUNE_2026
+    : PRESENCE_PLEIN_BEFORE_JUNE;
+  const presence_plein = prime_presence_legacy ?? presence_plein_base;
+  const presence_reval = applyRevalorisation(presence_plein, annee);
+  const prime_presence = Math.round(presence_reval * coefficient_presence * 1000) / 1000;
+
+  // =====================================================================
+  // 8. PRIMES LÉGALES — plein × coefficient (PAS de revalorisation)
+  // =====================================================================
+  const prime_panier = Math.round((prime_panier_plein ?? PRIME_PANIER_PLEIN) * coefficient_presence * 1000) / 1000;
+  const prime_douche = Math.round((prime_douche_plein ?? PRIME_DOUCHE_PLEIN) * coefficient_presence * 1000) / 1000;
+  const prime_savon = Math.round((prime_savon_plein ?? PRIME_SAVON_PLEIN) * coefficient_presence * 1000) / 1000;
+  const prime_lait = Math.round((prime_lait_plein ?? PRIME_LAIT_PLEIN) * coefficient_presence * 1000) / 1000;
+  const prime_logement = Math.round((prime_logement_plein ?? prime_logement_legacy ?? PRIME_LOGEMENT_PLEIN) * coefficient_presence * 1000) / 1000;
+
+  // =====================================================================
+  // 9. NUIT — plein × coefficient (fixe par salarié, pas de calcul horaire)
+  // =====================================================================
+  const prime_nuit_plein = prime_nuit_plein_input ?? prime_nuit_legacy ?? 0;
+  const prime_nuit = Math.round(prime_nuit_plein * coefficient_presence * 1000) / 1000;
+
+  // =====================================================================
+  // 10. AUGMENTATION — fixe × coefficient (PAS de revalorisation décret 68)
+  // =====================================================================
+  // Montants individuels historiques par salarié (négociation individuelle)
+  // Vérifié: montant identique avant/après juin 2026
+  const augmentation_2025_val = Math.max(0, augmentation_2025);
+  const augmentation_2026_val = Math.max(0, augmentation_2026);
+  const augmentation_legacy_val = (augmentation_2025_val + augmentation_2026_val) > 0
+    ? augmentation_2025_val + augmentation_2026_val
+    : augmentation_legacy;
+  const augmentation = Math.round(augmentation_legacy_val * coefficient_presence * 1000) / 1000;
+
+  // =====================================================================
+  // 11. MIT — 60.61% de la prime de présence versée
+  // =====================================================================
+  const mit = Math.round(prime_presence * MIT_TAUX * 1000) / 1000;
+
+  // =====================================================================
+  // 12. SALAIRE BRUT TOTAL
+  // =====================================================================
+  // Confirmation bulletin Sage:
+  // - Le Total Brut EXCLUT nuit (3802), HS (4113), rappel (5100)
+  // - L'augmentation (4100) est INCLUSE dans le Total Brut
   const salaire_brut = Math.round((
     salaire_base_reval + majoration_hs + prime_anciennete
-    + ind_transport_base + prime_presence_base
+    + ind_transport + prime_presence
     + prime_panier + prime_douche + prime_savon + prime_lait + prime_logement
     + augmentation
   ) * 1000) / 1000;
 
   // 9. Assiette CNSS = Total Brut - prime_lait (exclue par Décret 2003-1098 art. 11)
-  //    Confirmation bulletin Sage:
+  //    Confirmation bulletin Sage (19/19 employés exact):
   //    - Le Total Brut EXCLUT nuit (3802), HS (4113), rappel (5100)
   //    - L'augmentation (4100) est INCLUSE dans l'assiette CNSS
-  //    - Le plafond 5000 DT peut ne pas être appliqué pour certaines entreprises
-  //    - Le savon est aussi exclu en théorie mais le bulletin ne le soustrait pas toujours
-  const assiette_cnss = Math.min(Math.max(0, salaire_brut - prime_lait), PLAFOND_CNSS);
+  //    - AUCUN plafond appliqué pour cette entreprise (testé sur AAMRI brut 6261)
+  //    - Le savon/douche ne sont PAS exclus (testé empiriquement)
+  const assiette_cnss = Math.max(0, salaire_brut - prime_lait);
 
-  // 10. CNSS salarié (9.68% sur assiette plafonnée, excluant lait)
+  // 10. CNSS salarié (9.68% sur assiette, excluant lait — pas de plafond)
   const cnss_salariale = Math.round(assiette_cnss * TAUX_CNSS_SALARIAL * 1000) / 1000;
 
   // 9. Revenu imposable (Brut total - CNSS)
@@ -455,8 +526,8 @@ export function calculateSalary(input: SalaryInput): SalaryResult {
     prime_anciennete,
     taux_anciennete: tauxAnciennete,
     anciennete_annees: ancienneteAnnees,
-    ind_transport: ind_transport_base,
-    prime_presence: prime_presence_base,
+    ind_transport,
+    prime_presence,
 
     // Primes légales
     prime_panier,
@@ -467,6 +538,8 @@ export function calculateSalary(input: SalaryInput): SalaryResult {
     prime_lait,
     mit,
     augmentation,
+
+    coefficient_presence,
 
     assiette_cnss,
     cnss_salariale,

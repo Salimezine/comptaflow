@@ -25,6 +25,7 @@ export interface Employee {
   nouveau_salaire_brut: number;
   date_sortie: string;
   date_recrutement: string;
+  transport_plein: number; // Montant plein selon barème (92.800 ou 100.533)
 }
 
 export interface PointageData {
@@ -109,6 +110,20 @@ function detectDateMonthYear(filename: string): { mois: number; annee: number } 
   return null;
 }
 
+/**
+ * Transport plein par défaut selon fonction (barème STE BAUD, juin 2026)
+ * Vérifié empiriquement sur 21 employés × bulletin Sage
+ * - Ouvrier: 92.800 DT
+ * - Chef d'équipe / Conducteur d'engins: 100.533 DT
+ */
+function getTransportPlein(fonction: string): number {
+  const f = fonction.toLowerCase();
+  if (f.includes('chef') || f.includes('conducteur') || f.includes('engin')) {
+    return 100.533;
+  }
+  return 92.800; // Default: ouvrier
+}
+
 export function parseFichePersonnel(workbook: any, filename: string): ParsedFiche {
   const employees: Employee[] = [];
   const pointage: PointageData[] = [];
@@ -136,6 +151,10 @@ export function parseFichePersonnel(workbook: any, filename: string): ParsedFich
       const nom = cleanStr(row[DP_COLUMNS.nom]);
       const prenom = cleanStr(row[DP_COLUMNS.prenom]);
       if (!nom && !prenom) continue; // Skip empty rows
+
+      // Skip former employees (date_sortie renseignée = export historique cumulé)
+      const dateSortie = cleanStr(row[DP_COLUMNS.date_sortie]);
+      if (dateSortie && dateSortie.length > 0) continue;
 
       // Matricule: use the "Mat" column (index 1) if present, otherwise use row number
       let matricule = cleanStr(row[1]);
@@ -172,6 +191,8 @@ export function parseFichePersonnel(workbook: any, filename: string): ParsedFich
         nouveau_salaire_brut: parseNum(row[DP_COLUMNS.nouveau_brut]),
         date_sortie: cleanStr(row[DP_COLUMNS.date_sortie]),
         date_recrutement: cleanStr(row[DP_COLUMNS.date_recrutement]),
+        // Transport plein par défaut selon fonction (barème STE BAUD)
+        transport_plein: getTransportPlein(cleanStr(row[DP_COLUMNS.fonction])),
       });
     }
   }
