@@ -108,7 +108,7 @@ export interface SalaryResult {
   irpp: number;
 
   // Charges patronales
-  cnss_patronale: number;     // 16.57%
+  cnss_patronale: number;     // 17.07%
   at_mp: number;              // 0.5% (accidents du travail)
   tfp: number;                // 1% (Taxe Formation Professionnelle)
   foprolos: number;           // 1% (Fonds de Promotion des Logements)
@@ -140,7 +140,7 @@ const PLAFOND_CNSS = 5000; // DT/mois
 
 // Taux CNSS
 const TAUX_CNSS_SALARIAL = 0.0968; // 9.68%
-const TAUX_CNSS_PATRONAL = 0.1657; // 16.57%
+const TAUX_CNSS_PATRONAL = 0.1707; // 17.07% — depuis janvier 2025
 const TAUX_AT_MP = 0.005;          // 0.5%
 const TAUX_TFP = 0.01;             // 1%
 const TAUX_FOPROLOS = 0.01;        // 1%
